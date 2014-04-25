@@ -1,3 +1,6 @@
+# Use master until this reconnect issue gets sorted
+# asyncio-mongo>=0.2.3
+git+https://bitbucket.org/mrdon/asyncio-mongo.git#egg=asyncio-mongo
 git+git://github.com/mrdon/bottle.git
 git+https://bitbucket.org/atlassianlabs/bottle-ac.git@master#egg=fuckyouheroku
 # Use asyncio-redis fork bad handling of connection timeouts
@@ -7,7 +10,4 @@ MarkupSafe==0.18
 PyJWT==0.1.9
 aiohttp==0.6.4
 asyncio==0.4.1
-# Use master until this reconnect issue gets sorted
-# asyncio-mongo>=0.2.3
-git+https://bitbucket.org/mrdon/asyncio-mongo.git#egg=asyncio-mongo_mrdon
 gunicorn==18.0

@@ -1,4 +1,4 @@
-A simple HipChat add-on that supports group mentions via room notifications.
+A simple HipChat add-on that supports async standups.
 
-For full help, type "/alias -h".
+For full help, type "/standup -h".
 
