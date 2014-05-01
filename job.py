@@ -38,7 +38,7 @@ def execute():
                 if standup_users:
                     _, statuses = yield from app.find_statuses(addon, client)
                     if statuses:
-                        yield from client.send_notification(addon, text="Standup for %s" % " ".join(standup_users))
+                        yield from client.send_notification(addon, text="10 AM standup for %s" % " ".join(standup_users))
                         yield from app.display_all_statuses(addon, client)
 
             elif resp.status == 404:
