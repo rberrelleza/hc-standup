@@ -32,6 +32,7 @@ def execute():
                     if 'timezone' in user and is_available:
                         tz = timezone(user['timezone'])
                         now = tz.localize(datetime.now())
+                        print("User %s tz: %s" % (user['name'], now.strftime("%H")))
                         if int(now.strftime("%H")) == 10 or force:
                             standup_user_mentions.append(user['mention_name'])
 
