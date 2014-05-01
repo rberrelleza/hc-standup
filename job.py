@@ -26,20 +26,27 @@ def execute():
                                       headers=headers, timeout=10)) as resp:
             if resp.status == 200:
                 body = yield from resp.read(decode=True)
-                standup_users = []
+                standup_user_mentions = []
                 for user in body['participants']:
                     is_online = user['presence']['is_online']
                     if 'timezone' in user and is_online:
                         tz = timezone(user['timezone'])
                         now = tz.localize(datetime.now())
                         if int(now.strftime("%H")) == 10 or force:
-                            standup_users.append("@" + user['mention_name'])
+                            standup_user_mentions.append(user['mention_name'])
 
-                if standup_users:
+                if standup_user_mentions:
                     _, statuses = yield from app.find_statuses(addon, client)
                     if statuses:
-                        yield from client.send_notification(addon, text="10 AM standup for %s" % " ".join(standup_users))
-                        yield from app.display_all_statuses(addon, client)
+                        status_mentions = [status['user']['mention_name'] for status in statuses.values()]
+                        standup_user_mentions = [mention for mention in standup_user_mentions
+                                                 if mention in status_mentions]
+                        if standup_user_mentions:
+                            mentions_with_at = ["@" + mention for mention in standup_user_mentions]
+                            yield from client.send_notification(addon,
+                                                                text="10 AM standup for %s" % " "
+                                                                .join(mentions_with_at))
+                            yield from app.display_all_statuses(addon, client)
 
             elif resp.status == 404:
                 print("weird...")
