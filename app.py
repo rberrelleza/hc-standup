@@ -2,6 +2,7 @@ from datetime import datetime
 import logging
 import os
 import asyncio
+import markdown
 from bottle_ac import create_addon_app
 
 log = logging.getLogger(__name__)
@@ -92,7 +93,6 @@ def record_status(addon, client, from_user, status):
     spec, statuses = yield from find_statuses(addon, client)
 
     user_mention = from_user['mention_name']
-    print("storing user: %r" % from_user)
     statuses[user_mention] = {
         "user": from_user,
         "message": status,
@@ -102,7 +102,7 @@ def record_status(addon, client, from_user, status):
     data = dict(spec)
     data['users'] = statuses
 
-    yield from _standup_db(addon).update(spec, data, upsert=True)
+    yield from standup_db(addon).update(spec, data, upsert=True)
 
     yield from client.send_notification(addon, text="Status recorded")
 
@@ -113,7 +113,7 @@ def display_one_status(addon, client, mention_name):
 
     status = statuses.get(mention_name)
     if status:
-        yield from client.send_notification(addon, text=render_status(status))
+        yield from client.send_notification(addon, html=render_status(status))
     else:
         yield from client.send_notification(addon, text="No status found")
 
@@ -123,31 +123,36 @@ def display_all_statuses(addon, client):
     spec, statuses = yield from find_statuses(addon, client)
 
     if statuses:
-        txt = ""
-        for status in statuses.values():
-            txt += render_status(status) + "\n"
-        yield from client.send_notification(addon, text=txt)
+        yield from client.send_notification(addon, html=render_all_statuses(statuses))
     else:
         yield from client.send_notification(addon, text="No status found")
 
 
+def render_all_statuses(statuses):
+    txt = ""
+    for status in statuses.values():
+        txt += render_status(status) + "<br>"
+    return txt
+
+
 def render_status(status):
-    print("status: %r" % status)
     message = status['message']
+    html = markdown.markdown(message)
+    html = html.replace("<p>", "")
+    html = html.replace("</p>", "")
     name = status['user']['name']
-    return "{name}: {message}".format(name=name, message=message)
+    return "<b>{name}</b>: {message}".format(name=name, message=html)
 
 
 @asyncio.coroutine
 def find_statuses(addon, client):
     spec = status_spec(client)
-    data = yield from _standup_db(addon).find_one(spec)
+    data = yield from standup_db(addon).find_one(spec)
     if not data:
         statuses = {}
     else:
         statuses = data.get('users', {})
 
-    print("found statuses: %r" % statuses)
     return spec, statuses
 
 
@@ -159,7 +164,7 @@ def status_spec(client):
     }
 
 
-def _standup_db(addon):
+def standup_db(addon):
     return addon.mongo_db.default_database['standup']
 
 
