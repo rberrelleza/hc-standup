@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime
-from pytz import timezone
+from pytz import timezone, utc
 import sys
 
 from bottle_ac import http_request
@@ -31,8 +31,10 @@ def execute():
                     is_available = not 'show' in user['presence']
                     if 'timezone' in user and is_available:
                         tz = timezone(user['timezone'])
-                        now = tz.localize(datetime.now())
-                        print("User %s hour: %s tz: %s actual_tx: %s" % (user['name'], now.strftime("%H"), tz, user['timezone']))
+                        u_ts=datetime.utcnow()
+                        u_utc=u_ts.replace(tzinfo=utc)
+                        now = tz.normalize(u_utc.astimezone(tz))
+                        print("User %s hour: %s tz: %s actual_tx: %s" % (user['name'], now.strftime("%H"), now, user['timezone']))
                         if int(now.strftime("%H")) == 10 or force:
                             standup_user_mentions.append(user['mention_name'])
 
