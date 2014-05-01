@@ -106,7 +106,7 @@ def record_status(addon, client, from_user, status):
 
     yield from standup_db(addon).update(spec, data, upsert=True)
 
-    yield from client.send_notification(addon, text="Standup status recorded")
+    yield from client.send_notification(addon, text="Status recorded.  Type '/standup' to see the full report.")
 
 
 @asyncio.coroutine
@@ -117,7 +117,8 @@ def display_one_status(addon, client, mention_name):
     if status:
         yield from client.send_notification(addon, html=render_status(status))
     else:
-        yield from client.send_notification(addon, text="No status found")
+        yield from client.send_notification(addon, text="No status found. "
+                                                        "Type '/standup I did this' to add your own status.")
 
 
 @asyncio.coroutine
@@ -127,7 +128,8 @@ def display_all_statuses(addon, client):
     if statuses:
         yield from client.send_notification(addon, html=render_all_statuses(statuses))
     else:
-        yield from client.send_notification(addon, text="No status found")
+        yield from client.send_notification(addon, text="No status found. "
+                                                        "Type '/standup I did this' to add your own status.")
 
 
 def render_all_statuses(statuses):
