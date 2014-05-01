@@ -1,9 +1,13 @@
 import asyncio
 from datetime import datetime
 from pytz import timezone
+import sys
+
 from bottle_ac import http_request
 import app
 
+
+force = sys.argv and len(sys.argv) == 2 and sys.argv[1] == "--force"
 
 @asyncio.coroutine
 def execute():
@@ -27,7 +31,7 @@ def execute():
                     if 'timezone' in user:
                         tz = timezone(user['timezone'])
                         now = tz.localize(datetime.now())
-                        if int(now.strftime("%H")) == 10:
+                        if int(now.strftime("%H")) == 10 or force:
                             standup_users.append("@" + user['mention_name'])
 
                 if standup_users:

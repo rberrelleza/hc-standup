@@ -2,6 +2,7 @@ from datetime import datetime
 import logging
 import os
 import asyncio
+import arrow
 import markdown
 from bottle_ac import create_addon_app
 
@@ -137,12 +138,14 @@ def render_all_statuses(statuses):
 
 
 def render_status(status):
+    msg_date = arrow.get(status['date'])
+
     message = status['message']
     html = markdown.markdown(message)
     html = html.replace("<p>", "")
     html = html.replace("</p>", "")
     name = status['user']['name']
-    return "<b>{name}</b>: {message}".format(name=name, message=html)
+    return "<b>{name}</b>: {message} -- {ago}".format(name=name, message=html, ago=msg_date.humanize())
 
 
 @asyncio.coroutine
