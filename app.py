@@ -106,7 +106,7 @@ def record_status(addon, client, from_user, status):
 
     yield from standup_db(addon).update(spec, data, upsert=True)
 
-    yield from client.send_notification(addon, text="Status recorded")
+    yield from client.send_notification(addon, text="Standup status recorded")
 
 
 @asyncio.coroutine

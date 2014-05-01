@@ -28,8 +28,8 @@ def execute():
                 body = yield from resp.read(decode=True)
                 standup_user_mentions = []
                 for user in body['participants']:
-                    is_online = user['presence']['is_online']
-                    if 'timezone' in user and is_online:
+                    is_available = not 'show' in user['presence']
+                    if 'timezone' in user and is_available:
                         tz = timezone(user['timezone'])
                         now = tz.localize(datetime.now())
                         if int(now.strftime("%H")) == 10 or force:
