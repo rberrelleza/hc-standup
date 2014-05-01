@@ -145,7 +145,7 @@ def render_status(status):
     html = html.replace("<p>", "")
     html = html.replace("</p>", "")
     name = status['user']['name']
-    return "<b>{name}</b>: {message} -- {ago}".format(name=name, message=html, ago=msg_date.humanize())
+    return "<b>{name}</b>: {message} -- <i>{ago}</i>".format(name=name, message=html, ago=msg_date.humanize())
 
 
 @asyncio.coroutine
