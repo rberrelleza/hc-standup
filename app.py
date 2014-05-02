@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import os
 import asyncio
@@ -158,6 +158,14 @@ def find_statuses(addon, client):
         statuses = {}
     else:
         statuses = data.get('users', {})
+        result = {}
+        for mention_name, status in statuses.items():
+            if status['date'].replace(tzinfo=None) > datetime.utcnow()-timedelta(days=3):
+                result[mention_name] = status
+            else:
+                print("Filtering status from %s of date %s" % (mention_name, status['date']))
+
+        statuses = result
 
     return spec, statuses
 
