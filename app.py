@@ -13,7 +13,7 @@ app = create_addon_app(__name__,
                        from_name="Standup",
                        base_url="http://192.168.33.1:8080")
 
-app.config['MONGO_URL'] = os.environ.get("MONGOHQ_URL", None)
+app.config['MONGO_URL'] = os.environ.get("MONGO_URL", None)
 app.config['REDIS_URL'] = os.environ.get("REDISTOGO_URL", None)
 
 
