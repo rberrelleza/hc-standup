@@ -21,9 +21,9 @@ def init():
     @asyncio.coroutine
     def _send_welcome(event):
         client = event['client']
-        yield from client.send_notification(app.addon,
+        asyncio.async(client.send_notification(app.addon,
             text="HC Standup was added to this room. Type '/standup I did *this*' to get started (yes, "
-                 "you can use Markdown).")
+                 "you can use Markdown)."))
 
     app.addon.register_event('install', _send_welcome)
 
