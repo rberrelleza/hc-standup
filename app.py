@@ -63,7 +63,7 @@ def capabilities(request, response):
                 {
                     "url": app.config.get("BASE_URL") + "/standup",
                     "event": "room_message",
-                    "pattern": "^/standup(\s|$).*"
+                    "pattern": "^/(?:status|standup)(\s|$).*"
                 }
             ],
         }
@@ -84,10 +84,27 @@ def standup(request, response):
         yield from display_all_statuses(app.addon, client)
     elif status.startswith("@") and ' ' not in status:
         yield from display_one_status(app.addon, client, mention_name=status)
+    elif status == "clear":
+        yield from clear_status(app.addon, client, from_user)
     else:
         yield from record_status(app.addon, client, from_user, status)
 
     response.status = 204
+
+
+@asyncio.coroutine
+def clear_status(addon, client):
+    spec, statuses = yield from find_statuses(addon, client)
+
+    user_mention = from_user['mention_name']
+    statuses[user_mention] = {}
+
+    data = dict(spec)
+    data['users'] = statuses
+
+    yield from standup_db(addon).update(spec, data, upsert=True)
+
+    yield from client.send_notification(addon, text="Status Cleared")
 
 
 @asyncio.coroutine
