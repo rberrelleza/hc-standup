@@ -93,11 +93,11 @@ def standup(request, response):
 
 
 @asyncio.coroutine
-def clear_status(addon, client):
+def clear_status(addon, client, from_user):
     spec, statuses = yield from find_statuses(addon, client)
 
     user_mention = from_user['mention_name']
-    statuses[user_mention] = {}
+    del statuses[user_mention]
 
     data = dict(spec)
     data['users'] = statuses
@@ -177,10 +177,10 @@ def find_statuses(addon, client):
         statuses = data.get('users', {})
         result = {}
         for mention_name, status in statuses.items():
-            if status['date'].replace(tzinfo=None) > datetime.utcnow()-timedelta(days=3):
+            if status and status['date'].replace(tzinfo=None) > datetime.utcnow()-timedelta(days=3):
                 result[mention_name] = status
             else:
-                print("Filtering status from %s of date %s" % (mention_name, status['date']))
+                print("Filtering status from %s of date %s" % (mention_name, status.get('date')))
 
         statuses = result
 
