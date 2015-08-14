@@ -10,7 +10,7 @@ To get started, type `/standup`.
 * A running instance of [mongodb](https://www.mongodb.org/)
 * A running instance of [redis](https://www.redis.io/)
 * An [ngrok](https://ngrok.com/) tunnel (if you want to connect to hipchat.com).
-* [Python 3.3](https://www.python.org/downloads/release/python-336/) and [virtualenv](https://virtualenv.pypa.io/en/latest/)
+* [Python 3.4](https://www.python.org/downloads/release/python-343/) and [virtualenv](https://virtualenv.pypa.io/en/latest/)
 
 ## Running standup bot
 ```
@@ -18,8 +18,8 @@ To get started, type `/standup`.
 
 git clone git@bitbucket.org:mrdon/hc-standup.git
 cd hc-standup
-virtualenv -p python3.3 venv
+virtualenv -p python3.4 venv
 ./venv/bin/pip install -r requirements.txt 
 ngrok 8080 # take note of the ngrok subdomain you've connected to and background the process 
-BASE_URL=https://{ngroktunnel}.ngrok.com ./venv/bin/python3.3 app.py 
+BASE_URL=https://{ngroktunnel}.ngrok.com venv/bin/gunicorn app:app -k aiohttp.worker.GunicornWebWorker -b localhost:8080 --reload
 ```

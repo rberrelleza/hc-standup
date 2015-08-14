@@ -1,0 +1,80 @@
+body {
+    background: white;
+}
+
+.statuses {
+    list-style-type: none;
+    padding: 0;
+}
+
+.status {
+    padding: 10px 20px;
+}
+
+.statuses .status {
+    border-bottom: 1px solid #ccc;
+}
+
+.header {
+    margin-bottom: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.header > div {
+    display: inline-block;
+    margin-left: 5px;
+}
+
+.header .aui-avatar img {
+    border-radius: 100%;
+}
+
+.header .author {
+    font-size: 16px;
+    line-height: 16px;
+}
+
+.header .metadata {
+    font-size: 12px;
+    line-height: 12px;
+    color: #999;
+}
+
+.spinner-container {
+    margin-top: 100px;
+}
+
+footer {
+    position: absolute;
+    bottom: 0;
+    padding: 10px;
+}
+
+.create-dialog .aui-group {
+    margin: 0;
+    height: 100%;
+}
+
+.create-dialog .status {
+    padding: 0;
+}
+
+.create-dialog .last-status {
+    width: 200px;
+}
+
+.create-dialog .report-input, .create-dialog .aui textarea.textarea, .create-dialog form {
+    height: 89%;
+    width: 100%;
+    max-width: none;
+}
+
+.create-dialog textarea {
+    resize: none;
+}
+
+.create-dialog form.aui .buttons-container {
+    padding: 4px 0;
+}

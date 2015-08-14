@@ -1,0 +1,20 @@
+{% extends "base.jinja2" %}
+{% block title %}Report{% endblock %}
+{% block head %}
+    {{ super() }}
+    <script src="static/js/report.js"></script>
+{% endblock %}
+{% block content %}
+    <ul class="statuses">
+    </ul>
+    <div class="spinner-container"></div>
+    <footer>
+        <div>
+            <button class="aui-button aui-button-subtle create-new-button"
+                    data-room-id={{room_id}}>
+                <span class="aui-icon aui-icon-small aui-iconfont-add">Create</span>
+                &nbsp;Create new report
+            </button>
+        </div>
+    </footer>
+{% endblock %}

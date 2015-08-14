@@ -1,46 +1,52 @@
-from datetime import datetime, timedelta
-import logging
-import os
 import asyncio
+from datetime import datetime, timedelta
+import binascii
+import aiohttp
+from aiohttp import web
+from aiohttp_hipchat.addon import create_addon_app, validate_jwt
+from aiohttp_hipchat.addon import require_jwt
+import json
+from aiohttp_hipchat.util import http_request
+import aiohttp_jinja2
+from aiohttp_session import get_session
 import arrow
+import jinja2
 import markdown
-from bottle_ac import create_addon_app
+import os
 
-log = logging.getLogger(__name__)
-app = create_addon_app(__name__,
-                       plugin_key="hc-standup",
+GLANCE_MODULE_KEY = "hcstandup.glance"
+AVATAR_CACHE_KEY = "hipchat-avatar:{user_id}"
+
+app = create_addon_app(plugin_key="hc-standup",
                        addon_name="HC Standup",
-                       from_name="Standup",
-                       base_url="http://192.168.33.1:8080")
+                       from_name="Standup")
 
-app.config['MONGO_URL'] = os.environ.get("MONGO_URL", None)
-app.config['REDIS_URL'] = os.environ.get("REDISTOGO_URL", None)
+aiohttp_jinja2.setup(app, autoescape=True, loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(__file__), 'views')))
 
-
-def init():
+@asyncio.coroutine
+def init(app):
     @asyncio.coroutine
-    def _send_welcome(event):
+    def send_welcome(event):
         client = event['client']
-        asyncio.async(client.send_notification(app.addon,
-            text="HC Standup was added to this room. Type '/standup I did *this*' to get started (yes, "
-                 "you can use Markdown)."))
+        yield from client.send_notification(app['addon'], text="HC Standup was added to this room. Type '/standup I did *this*' to get started (yes, "
+                                                    "you can use Markdown).")
 
-    app.addon.register_event('install', _send_welcome)
+    app['addon'].register_event('install', send_welcome)
 
+app.add_hook("before_first_request", init)
 
-app.add_hook('before_first_request', init)
+@asyncio.coroutine
+def capabilities(request):
 
-
-# noinspection PyUnusedLocal
-@app.route('/')
-def capabilities(request, response):
-    return {
+    config = request.app["config"]
+    base_url = config["BASE_URL"]
+    response = web.Response(text=json.dumps({
         "links": {
-            "self": app.config.get("BASE_URL"),
-            "homepage": app.config.get("BASE_URL")
+            "self": base_url,
+            "homepage": base_url
         },
-        "key": app.config.get("PLUGIN_KEY"),
-        "name": app.config.get("ADDON_NAME"),
+        "key": config.get("PLUGIN_KEY"),
+        "name": config.get("ADDON_NAME"),
         "description": "HipChat connect add-on that supports async standups",
         "vendor": {
             "name": "Atlassian Labs",
@@ -50,51 +56,119 @@ def capabilities(request, response):
             "installable": {
                 "allowGlobal": False,
                 "allowRoom": True,
-                "callbackUrl": app.config.get("BASE_URL") + "/installable/"
+                "callbackUrl": base_url + "/installable"
             },
             "hipchatApiConsumer": {
                 "scopes": [
                     "view_group",
-                    "send_notification"
+                    "send_notification",
+                    "view_room"
                 ],
-                "fromName": app.config.get("FROM_NAME")
+                "fromName": config.get("FROM_NAME")
             },
             "webhook": [
                 {
-                    "url": app.config.get("BASE_URL") + "/standup",
+                    "url": base_url + "/standup",
                     "event": "room_message",
                     "pattern": "^/(?:status|standup)(\s|$).*"
                 }
             ],
+            "glance": [
+                {
+                    "key": GLANCE_MODULE_KEY,
+                    "name": {
+                        "value": "Standup"
+                    },
+                    "queryUrl": base_url + "/glance",
+                    "target": "hcstandup.sidebar",
+                    "icon": {
+                        "url": base_url + "/static/info.png",
+                        "url@2x": base_url + "/static/info@2x.png"
+                    }
+                }
+            ],
+            "webPanel": [
+                {
+                    "key": "hcstandup.sidebar",
+                    "name": {
+                        "value": "Standup reports"
+                    },
+                    "location": "hipchat.sidebar.right",
+                    "url": base_url + "/report"
+                },
+                {
+                    "key": "hcstandup.dialog",
+                    "name": {
+                        "value": "New report"
+                    },
+                    "location": "hipchat.sidebar.right",
+                    "url": base_url + "/dialog"
+                }
+            ]
+        }
+    }))
+
+    return response
+
+@asyncio.coroutine
+@require_jwt(app)
+def get_glance(request):
+    spec, statuses = yield from find_statuses(app, request.client)
+
+    return web.Response(text=json.dumps(glance_json(statuses)))
+
+def glance_json(statuses):
+    return {
+        "label": {
+            "type": "html",
+            "value": "<strong>%s</strong> Standup reports" % len(statuses.items())
         }
     }
 
-
-@app.route('/standup', method='POST')
 @asyncio.coroutine
-def standup(request, response):
-    body = request.json
+def find_statuses(app, client):
+    spec = status_spec(client)
+    data = yield from standup_db(app).find_one(spec)
+    if not data:
+        statuses = {}
+    else:
+        statuses = data.get('users', {})
+        result = {}
+        for mention_name, status in statuses.items():
+            if status and status['date'].replace(tzinfo=None) > datetime.utcnow()-timedelta(days=3):
+                result[mention_name] = status
+            else:
+                print("Filtering status from %s of date %s" % (mention_name, status.get('date')))
+
+        statuses = result
+
+    return spec, statuses
+
+@asyncio.coroutine
+def standup_webhook(request):
+    addon = request.app['addon']
+    body = yield from request.json()
     client_id = body['oauth_client_id']
-    client = yield from app.addon.load_client(client_id)
+    client = yield from addon.load_client(client_id)
 
     status = str(body['item']["message"]["message"][len("/standup"):]).strip()
     from_user = body['item']['message']['from']
+    room = body['item']['room']
 
     if not status:
-        yield from display_all_statuses(app.addon, client)
+        yield from display_all_statuses(app, client)
     elif status.startswith("@") and ' ' not in status:
-        yield from display_one_status(app.addon, client, mention_name=status)
+        yield from display_one_status(app, client, mention_name=status)
     elif status == "clear":
-        yield from clear_status(app.addon, client, from_user)
+        yield from clear_status(app, client, from_user, room)
     else:
-        yield from record_status(app.addon, client, from_user, status)
+        yield from record_status(app, client, from_user, status, room)
 
-    response.status = 204
-
+    return web.Response(status=204)
 
 @asyncio.coroutine
-def clear_status(addon, client, from_user):
-    spec, statuses = yield from find_statuses(addon, client)
+def clear_status(app, client, from_user, room):
+    spec, statuses = yield from find_statuses(app, client)
 
     user_mention = from_user['mention_name']
     del statuses[user_mention]
@@ -102,16 +176,43 @@ def clear_status(addon, client, from_user):
     data = dict(spec)
     data['users'] = statuses
 
-    yield from standup_db(addon).update(spec, data, upsert=True)
+    yield from standup_db(app).update(spec, data, upsert=True)
 
-    yield from client.send_notification(addon, text="Status Cleared")
-
+    yield from client.send_notification(app['addon'], text="Status Cleared")
+    yield from update_glance(app, client, room)
 
 @asyncio.coroutine
-def record_status(addon, client, from_user, status):
-    spec, statuses = yield from find_statuses(addon, client)
+def display_one_status(app, client, mention_name):
+    spec, statuses = yield from find_statuses(app, client)
+
+    status = statuses.get(mention_name)
+    if status:
+        yield from client.send_notification(app['addon'], html=render_status(status))
+    else:
+        yield from client.send_notification(app['addon'], text="No status found. "
+                                                        "Type '/standup I did this' to add your own status.")
+
+@asyncio.coroutine
+def display_all_statuses(app, client):
+    spec, statuses = yield from find_statuses(app, client)
+
+    if statuses:
+        yield from client.send_notification(app['addon'], html=render_all_statuses(statuses))
+    else:
+        yield from client.send_notification(app['addon'], text="No status found. "
+                                                        "Type '/standup I did this' to add your own status.")
+
+@asyncio.coroutine
+def record_status(app, client, from_user, status, room):
+    spec, statuses = yield from find_statuses(app, client)
 
     user_mention = from_user['mention_name']
+
+    avatar_url = from_user.get('photo_url', None)
+    if not avatar_url:
+        avatar_url = yield from get_photo_url(client, from_user['id'], room['id'])
+        from_user['photo_url'] = avatar_url
+
     statuses[user_mention] = {
         "user": from_user,
         "message": status,
@@ -121,33 +222,203 @@ def record_status(addon, client, from_user, status):
     data = dict(spec)
     data['users'] = statuses
 
-    yield from standup_db(addon).update(spec, data, upsert=True)
+    yield from standup_db(app).update(spec, data, upsert=True)
+    yield from client.send_notification(app['addon'], text="Status recorded.  Type '/standup' to see the full report.")
+    yield from update_glance(app, client, room)
 
-    yield from client.send_notification(addon, text="Status recorded.  Type '/standup' to see the full report.")
+@asyncio.coroutine
+def get_photo_url(client, user_id, room_id):
+    cache_key = AVATAR_CACHE_KEY.format(user_id=user_id)
+    with (yield from app['redis_pool']) as redis:
+        photo_url = yield from redis.get(cache_key)
+
+    # if not avatar_url:
+    if True:
+        # get it from
+        room_participants = yield from get_room_participants(app, client, room_id)
+        with (yield from app['redis_pool']) as redis:
+            for room_participant in room_participants:
+                redis.setex(key=cache_key, value=room_participant['photo_url'], seconds=3600)
+                if room_participant['id'] == user_id:
+                    photo_url = room_participant['photo_url']
+
+        if not photo_url:
+            app.config.get("BASE_URL") + "/static/silhouette_125.png"
+
+    return photo_url
+
+@asyncio.coroutine
+def get_room_participants(app, client, room_id_or_name):
+    token = yield from client.get_token(app['redis_pool'], scopes=['view_room'])
+    with (yield from http_request('GET', "%s/room/%s/participant?expand=items" % (client.api_base_url, room_id_or_name),
+                                  headers={'content-type': 'application/json',
+                                           'authorization': 'Bearer %s' % token},
+                                  timeout=10)) as resp:
+        if resp.status == 200:
+            body = yield from resp.read(decode=True)
+            return body['items']
+
+@asyncio.coroutine
+def update_glance(app, client, room):
+    spec, statuses = yield from find_statuses(app, client)
+    yield from push_glance_update(app, client, room['id'], {
+        "glance": [{
+            "key": GLANCE_MODULE_KEY,
+            "content": glance_json(statuses)
+        }]
+    })
+
+@asyncio.coroutine
+def push_glance_update(app, client, room_id_or_name, glance):
+    token = yield from client.get_token(app['redis_pool'], scopes=['view_room'])
+    with (yield from http_request('POST', "%s/addon/ui/room/%s" % (client.api_base_url, room_id_or_name),
+                                  headers={'content-type': 'application/json',
+                                           'authorization': 'Bearer %s' % token},
+                                  data=json.dumps(glance),
+                                  timeout=10)) as resp:
+        if resp.status == 200:
+            body = yield from resp.read(decode=True)
+            return body['items']
+
+@asyncio.coroutine
+@require_jwt(app)
+@aiohttp_jinja2.template('report.jinja2')
+def report_view(request):
+    return {
+        "base_url": app["config"]["BASE_URL"],
+        "signed_request": request.signed_request,
+        "room_id": request.jwt_data["context"]["room_id"],
+    }
+
+@asyncio.coroutine
+@require_jwt(app)
+def get_statuses(request):
+    _, statuses = yield from find_statuses(app, request.client)
+
+    web.Response(text=json.dumps(glance_json(statuses)))
+
+@asyncio.coroutine
+@require_jwt(app)
+@aiohttp_jinja2.template('statuses.jinja2')
+def get_statuses_view(request):
+    results = []
+    _, statuses = yield from find_statuses(app, request.client)
+    for status in statuses.values():
+        results.append(status_to_view(status))
+
+    return {
+        "statuses": results
+    }
+
+@asyncio.coroutine
+@require_jwt(app)
+@aiohttp_jinja2.template('create.jinja2')
+def create_new_report_view(request):
+    spec, statuses = yield from find_statuses(app, request.client)
+
+    room_id = request.jwt_data['context']['room_id']
+    user_id = request.jwt_data['prn']
+
+    last_status = None
+    for status in statuses.values():
+        if str(status['user']['id']) == request.jwt_data['prn']:
+            last_status = status_to_view(status)
+            break
+    if not last_status:
+        user = yield from get_user(request.app, request.client, room_id, user_id)
+
+        last_status = {
+            "date": "Never",
+            "user": user,
+            "message_html": markdown.markdown("**Yesterday I worked on:**   \n" +
+                            """ ¯\\\_(ツ)\_/¯""")
+        }
+
+    return {
+        "base_url": app["config"]["BASE_URL"],
+        "status": last_status,
+        "signed_request": request.signed_request,
+        "report_template": "**Yesterday I worked on:**   \n" +
+                           "1.  \n\n" +
+                           "**Today**  \n" +
+                           "1.  "
+    }
+
+
+def update_session(request):
+    session = yield from get_session(request)
+    session["csrf_token"] = generate_csrf_token()
+    session["user_id"] = request.jwt_data['sub']
+    session["room_id"] = request.jwt_data['context']['room_id']
+    session["oauth_id"] = request.client.id
+    return session
+
+
+def generate_csrf_token():
+    return binascii.hexlify(os.urandom(128)).decode("utf-8")
 
 
 @asyncio.coroutine
-def display_one_status(addon, client, mention_name):
-    spec, statuses = yield from find_statuses(addon, client)
+@require_jwt(app)
+def create_new_report(request):
+    body = yield from request.json()
 
-    status = statuses.get(mention_name)
-    if status:
-        yield from client.send_notification(addon, html=render_status(status))
+    status = body['message']
+    room_id = request.jwt_data['context']['room_id']
+    user_id = request.jwt_data['prn']
+
+    room = {
+        "id": room_id
+    }
+    from_user = yield from get_user(request.app, request.client, room_id, user_id)
+
+    if not from_user:
+        return web.Response(status=401)
     else:
-        yield from client.send_notification(addon, text="No status found. "
-                                                        "Type '/standup I did this' to add your own status.")
-
+        yield from record_status(app, request.client, from_user, status, room)
+        return web.Response(status=204)
 
 @asyncio.coroutine
-def display_all_statuses(addon, client):
-    spec, statuses = yield from find_statuses(addon, client)
+def get_user(app, client, room_id, user_id):
+    from_user = None
+    room_participants = yield from get_room_participants(app, client, room_id)
+    for room_participant in room_participants:
+        if room_participant['id'] == int(user_id):
+            from_user = room_participant
 
-    if statuses:
-        yield from client.send_notification(addon, html=render_all_statuses(statuses))
-    else:
-        yield from client.send_notification(addon, text="No status found. "
-                                                        "Type '/standup I did this' to add your own status.")
+    return from_user
 
+@asyncio.coroutine
+def websocket_handler(request):
+    ws = web.WebSocketResponse()
+    ws.start(request)
+
+    while True:
+        msg = yield from ws.receive()
+
+        if msg.tp == aiohttp.MsgType.text:
+            if msg.data == 'close':
+                yield from ws.close()
+            else:
+                ws.send_str(msg.data + '/answer')
+        elif msg.tp == aiohttp.MsgType.close:
+            print('websocket connection closed')
+        elif msg.tp == aiohttp.MsgType.error:
+            print('ws connection closed with exception %s',
+                  ws.exception())
+
+    return ws
+
+def status_to_view(status):
+    msg_date = arrow.get(status['date'])
+    message = status['message']
+    html = markdown.markdown(message)
+
+    return {
+        "date": msg_date.humanize(),
+        "user": status['user'],
+        "message_html": html
+    }
 
 def render_all_statuses(statuses):
     txt = ""
@@ -166,27 +437,6 @@ def render_status(status):
     name = status['user']['name']
     return "<b>{name}</b>: {message} -- <i>{ago}</i>".format(name=name, message=html, ago=msg_date.humanize())
 
-
-@asyncio.coroutine
-def find_statuses(addon, client):
-    spec = status_spec(client)
-    data = yield from standup_db(addon).find_one(spec)
-    if not data:
-        statuses = {}
-    else:
-        statuses = data.get('users', {})
-        result = {}
-        for mention_name, status in statuses.items():
-            if status and status['date'].replace(tzinfo=None) > datetime.utcnow()-timedelta(days=3):
-                result[mention_name] = status
-            else:
-                print("Filtering status from %s of date %s" % (mention_name, status.get('date')))
-
-        statuses = result
-
-    return spec, statuses
-
-
 def status_spec(client):
     return {
         "client_id": client.id,
@@ -194,10 +444,32 @@ def status_spec(client):
         "capabilities_url": client.capabilities_url
     }
 
+def standup_db(app):
+    return app['mongodb'].default_database['standup']
 
-def standup_db(addon):
-    return addon.mongo_db.default_database['standup']
+app.router.add_static('/static', os.path.join(os.path.dirname(__file__), 'static'), name='static')
+app.router.add_route('GET', '/', capabilities)
+app.router.add_route('GET', '/glance', get_glance)
+app.router.add_route('GET', '/status', get_statuses)
+app.router.add_route('GET', '/status_view', get_statuses_view)
+app.router.add_route('POST', '/standup', standup_webhook)
+app.router.add_route('GET', '/report', report_view)
+app.router.add_route('GET', '/dialog', create_new_report_view)
+app.router.add_route('POST', '/create', create_new_report)
+app.router.add_route('GET', '/websocket', websocket_handler)
 
-
-if __name__ == "__main__":
-    app.run(host="", reloader=True, debug=True)
+# loop = asyncio.get_event_loop()
+# handler = app.make_handler()
+# f = loop.create_server(handler, '0.0.0.0', 8080)
+# srv = loop.run_until_complete(f)
+# print('serving on', srv.sockets[0].getsockname())
+# try:
+#     loop.run_forever()
+# except KeyboardInterrupt:
+#     pass
+# finally:
+#     loop.run_until_complete(handler.finish_connections(1.0))
+#     srv.close()
+#     loop.run_until_complete(srv.wait_closed())
+#     loop.run_until_complete(app.finish())
+# loop.close()
