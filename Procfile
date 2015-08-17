@@ -1,1 +1,1 @@
-web: gunicorn -k bottle_ac.worker.FixedGunicornWorker app:app
+web: gunicorn -k aiohttp.worker.GunicornWebWorker app:app
