@@ -5,8 +5,37 @@
   $(document).ready(function() {
 
     var baseUrl = $("meta[name=base-url]").attr("content");
+    var signedRequest = $("meta[name=acpt]").attr("content");
+
     var $spinner = $(".spinner-container");
     $spinner.spin("medium");
+
+    var uri = new URI(baseUrl);
+    var socket = new WebSocket((uri.protocol() === "https" ? "wss://" : "ws://") +
+            uri.hostname() + "/websocket?signed_request=" + signedRequest);
+    socket.onopen = function(event) {
+      console.log('a user connected');
+    };
+    socket.onclose = function(event) {
+      console.log('a user disconnected');
+    };
+    socket.onerror = function(event) {
+      console.log('a user got sour');
+    };
+    socket.onmessage = function(event) {
+      var message = JSON.parse(event.data);
+      var existingStatus = $("[data-user-id=" + message["user_id"] + "]");
+      if (existingStatus.length > 0) {
+        if (message.html !== "") {
+          existingStatus.replaceWith(message.html);
+        } else {
+          existingStatus.remove();
+        }
+      } else {
+        $(".statuses").append(message.html);
+      }
+
+    };
 
     $.ajax({
       url: baseUrl + "/status_view",

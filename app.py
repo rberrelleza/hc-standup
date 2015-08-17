@@ -3,12 +3,11 @@ from datetime import datetime, timedelta
 import binascii
 import aiohttp
 from aiohttp import web
-from aiohttp_hipchat.addon import create_addon_app, validate_jwt
-from aiohttp_hipchat.addon import require_jwt
+from aiohttp_ac_hipchat.addon import create_addon_app, validate_jwt
+from aiohttp_ac_hipchat.addon import require_jwt
 import json
-from aiohttp_hipchat.util import http_request
+from aiohttp_ac_hipchat.util import http_request
 import aiohttp_jinja2
-from aiohttp_session import get_session
 import arrow
 import jinja2
 import markdown
@@ -162,7 +161,7 @@ def standup_webhook(request):
     elif status == "clear":
         yield from clear_status(app, client, from_user, room)
     else:
-        yield from record_status(app, client, from_user, status, room)
+        yield from record_status(app, client, from_user, status, room, request)
 
     return web.Response(status=204)
 
@@ -180,6 +179,10 @@ def clear_status(app, client, from_user, room):
 
     yield from client.send_notification(app['addon'], text="Status Cleared")
     yield from update_glance(app, client, room)
+    yield from websocket_send_udpate({
+        "user_id": from_user["id"],
+        "html": ""
+    })
 
 @asyncio.coroutine
 def display_one_status(app, client, mention_name):
@@ -203,7 +206,7 @@ def display_all_statuses(app, client):
                                                         "Type '/standup I did this' to add your own status.")
 
 @asyncio.coroutine
-def record_status(app, client, from_user, status, room):
+def record_status(app, client, from_user, status, room, request):
     spec, statuses = yield from find_statuses(app, client)
 
     user_mention = from_user['mention_name']
@@ -225,6 +228,14 @@ def record_status(app, client, from_user, status, room):
     yield from standup_db(app).update(spec, data, upsert=True)
     yield from client.send_notification(app['addon'], text="Status recorded.  Type '/standup' to see the full report.")
     yield from update_glance(app, client, room)
+
+    html = aiohttp_jinja2.render_string("_status.jinja2", request, {
+        "status": status_to_view(statuses[user_mention])
+    }, app_key="aiohttp_jinja2_environment")
+    yield from websocket_send_udpate({
+        "user_id": from_user["id"],
+        "html": html
+    })
 
 @asyncio.coroutine
 def get_photo_url(client, user_id, room_id):
@@ -284,6 +295,9 @@ def push_glance_update(app, client, room_id_or_name, glance):
 @require_jwt(app)
 @aiohttp_jinja2.template('report.jinja2')
 def report_view(request):
+    """
+        Render the report view
+    """
     return {
         "base_url": app["config"]["BASE_URL"],
         "signed_request": request.signed_request,
@@ -375,7 +389,7 @@ def create_new_report(request):
     if not from_user:
         return web.Response(status=401)
     else:
-        yield from record_status(app, request.client, from_user, status, room)
+        yield from record_status(app, request.client, from_user, status, room, request)
         return web.Response(status=204)
 
 @asyncio.coroutine
@@ -389,9 +403,33 @@ def get_user(app, client, room_id, user_id):
     return from_user
 
 @asyncio.coroutine
+def keep_alive(websocket, ping_period=30):
+    while True:
+        yield from asyncio.sleep(ping_period)
+
+        try:
+            websocket.ping()
+        except Exception as e:
+            print('Got exception when trying to keep connection alive, '
+                       'giving up.')
+            return
+
+ws_connections = list()
+
+@asyncio.coroutine
+def websocket_send_udpate(data):
+    for ws_connection in ws_connections:
+        ws_connection.send_str(json.dumps(data))
+
+@asyncio.coroutine
+@require_jwt(app)
 def websocket_handler(request):
     ws = web.WebSocketResponse()
     ws.start(request)
+
+    asyncio.async(keep_alive(ws))
+
+    ws_connections.append(ws)
 
     while True:
         msg = yield from ws.receive()
@@ -402,8 +440,10 @@ def websocket_handler(request):
             else:
                 ws.send_str(msg.data + '/answer')
         elif msg.tp == aiohttp.MsgType.close:
+            ws_connections.remove(ws)
             print('websocket connection closed')
         elif msg.tp == aiohttp.MsgType.error:
+            ws_connections.remove(ws)
             print('ws connection closed with exception %s',
                   ws.exception())
 
