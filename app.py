@@ -109,8 +109,20 @@ def capabilities(request):
 
     return response
 
+
+def allow_cors(func):
+    def inner(*args, **kwargs):
+        response = (yield from func(*args, **kwargs))
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        return response
+
+    return inner
+
 @asyncio.coroutine
 @require_jwt(app)
+@allow_cors
 def get_glance(request):
     spec, statuses = yield from find_statuses(app, request.client)
 
@@ -357,19 +369,6 @@ def create_new_report_view(request):
                            "**Today**  \n" +
                            "1.  "
     }
-
-
-def update_session(request):
-    session = yield from get_session(request)
-    session["csrf_token"] = generate_csrf_token()
-    session["user_id"] = request.jwt_data['sub']
-    session["room_id"] = request.jwt_data['context']['room_id']
-    session["oauth_id"] = request.client.id
-    return session
-
-
-def generate_csrf_token():
-    return binascii.hexlify(os.urandom(128)).decode("utf-8")
 
 
 @asyncio.coroutine
