@@ -1,12 +1,11 @@
 import asyncio
 from datetime import datetime, timedelta
-import binascii
 import aiohttp
 from aiohttp import web
 from aiohttp_ac_hipchat.addon import create_addon_app, validate_jwt
 from aiohttp_ac_hipchat.addon import require_jwt
 import json
-from aiohttp_ac_hipchat.util import http_request
+from aiohttp_ac_hipchat.util import http_request, allow_cross_origin
 import aiohttp_jinja2
 import arrow
 import jinja2
@@ -15,6 +14,7 @@ import os
 
 GLANCE_MODULE_KEY = "hcstandup.glance"
 AVATAR_CACHE_KEY = "hipchat-avatar:{user_id}"
+USER_CACHE_KEY = "hipchat-user:{user_id}"
 
 app = create_addon_app(plugin_key="hc-standup",
                        addon_name="HC Standup",
@@ -109,20 +109,9 @@ def capabilities(request):
 
     return response
 
-
-def allow_cors(func):
-    def inner(*args, **kwargs):
-        response = (yield from func(*args, **kwargs))
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        return response
-
-    return inner
-
 @asyncio.coroutine
 @require_jwt(app)
-@allow_cors
+@allow_cross_origin
 def get_glance(request):
     spec, statuses = yield from find_statuses(app, request.client)
 
@@ -240,7 +229,11 @@ def record_status(app, client, from_user, status, room, request):
     yield from standup_db(app).update(spec, data, upsert=True)
     yield from client.send_notification(app['addon'], text="Status recorded.  Type '/standup' to see the full report.")
     yield from update_glance(app, client, room)
+    yield from update_sidebar(from_user, request, statuses, user_mention)
 
+
+@asyncio.coroutine
+def update_sidebar(from_user, request, statuses, user_mention):
     html = aiohttp_jinja2.render_string("_status.jinja2", request, {
         "status": status_to_view(statuses[user_mention])
     }, app_key="aiohttp_jinja2_environment")
@@ -249,37 +242,34 @@ def record_status(app, client, from_user, status, room, request):
         "html": html
     })
 
+
 @asyncio.coroutine
 def get_photo_url(client, user_id, room_id):
-    cache_key = AVATAR_CACHE_KEY.format(user_id=user_id)
-    with (yield from app['redis_pool']) as redis:
-        photo_url = yield from redis.get(cache_key)
-
-    # if not avatar_url:
-    if True:
-        # get it from
-        room_participants = yield from get_room_participants(app, client, room_id)
-        with (yield from app['redis_pool']) as redis:
-            for room_participant in room_participants:
-                redis.setex(key=cache_key, value=room_participant['photo_url'], seconds=3600)
-                if room_participant['id'] == user_id:
-                    photo_url = room_participant['photo_url']
-
-        if not photo_url:
-            app.config.get("BASE_URL") + "/static/silhouette_125.png"
+    user = (yield from get_user(app, client, room_id, user_id))
+    photo_url = user['photo_url']
+    if not photo_url:
+        app.config.get("BASE_URL") + "/static/silhouette_125.png"
 
     return photo_url
 
 @asyncio.coroutine
 def get_room_participants(app, client, room_id_or_name):
-    token = yield from client.get_token(app['redis_pool'], scopes=['view_room'])
+    redis_pool = app['redis_pool']
+    token = yield from client.get_token(redis_pool, scopes=['view_room'])
     with (yield from http_request('GET', "%s/room/%s/participant?expand=items" % (client.api_base_url, room_id_or_name),
                                   headers={'content-type': 'application/json',
                                            'authorization': 'Bearer %s' % token},
                                   timeout=10)) as resp:
         if resp.status == 200:
             body = yield from resp.read(decode=True)
-            return body['items']
+            room_participants = body['items']
+
+            with (yield from redis_pool) as redis:
+                for room_participant in room_participants:
+                    cache_key = USER_CACHE_KEY.format(user_id=room_participant['id'])
+                    redis.setex(key=cache_key, value=json.dumps(room_participant), seconds=3600)
+
+            return room_participants
 
 @asyncio.coroutine
 def update_glance(app, client, room):
@@ -314,6 +304,7 @@ def report_view(request):
         "base_url": app["config"]["BASE_URL"],
         "signed_request": request.signed_request,
         "room_id": request.jwt_data["context"]["room_id"],
+        "create_new_report_enabled": os.environ.get("create_new_report_enabled", False)
     }
 
 @asyncio.coroutine
@@ -393,13 +384,20 @@ def create_new_report(request):
 
 @asyncio.coroutine
 def get_user(app, client, room_id, user_id):
-    from_user = None
-    room_participants = yield from get_room_participants(app, client, room_id)
-    for room_participant in room_participants:
-        if room_participant['id'] == int(user_id):
-            from_user = room_participant
+    user = None
 
-    return from_user
+    user_key = USER_CACHE_KEY.format(user_id=user_id)
+    with (yield from app['redis_pool']) as redis:
+        cached_data = (yield from redis.get(user_key))
+        user = json.loads(cached_data.decode(encoding="utf-8")) if cached_data else None
+
+    if not user:
+        room_participants = yield from get_room_participants(app, client, room_id)
+        for room_participant in room_participants:
+            if room_participant['id'] == int(user_id):
+                user = room_participant
+
+    return user
 
 @asyncio.coroutine
 def keep_alive(websocket, ping_period=30):
@@ -413,7 +411,7 @@ def keep_alive(websocket, ping_period=30):
                        'giving up.')
             return
 
-ws_connections = list()
+ws_connections = set()
 
 @asyncio.coroutine
 def websocket_send_udpate(data):
@@ -428,7 +426,7 @@ def websocket_handler(request):
 
     asyncio.async(keep_alive(ws))
 
-    ws_connections.append(ws)
+    ws_connections.add(ws)
 
     while True:
         msg = yield from ws.receive()
@@ -496,19 +494,3 @@ app.router.add_route('GET', '/report', report_view)
 app.router.add_route('GET', '/dialog', create_new_report_view)
 app.router.add_route('POST', '/create', create_new_report)
 app.router.add_route('GET', '/websocket', websocket_handler)
-
-# loop = asyncio.get_event_loop()
-# handler = app.make_handler()
-# f = loop.create_server(handler, '0.0.0.0', 8080)
-# srv = loop.run_until_complete(f)
-# print('serving on', srv.sockets[0].getsockname())
-# try:
-#     loop.run_forever()
-# except KeyboardInterrupt:
-#     pass
-# finally:
-#     loop.run_until_complete(handler.finish_connections(1.0))
-#     srv.close()
-#     loop.run_until_complete(srv.wait_closed())
-#     loop.run_until_complete(app.finish())
-# loop.close()
