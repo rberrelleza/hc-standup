@@ -1,6 +1,8 @@
 (function() {
 
   function initWebSocket(baseUrl) {
+    var signedRequest = $("meta[name=acpt]").attr("content");
+
     var uri = new URI(baseUrl);
     var socket = new WebSocket((uri.protocol() === "https" ? "wss://" : "ws://") +
             uri.hostname() + "/websocket?signed_request=" + signedRequest);
