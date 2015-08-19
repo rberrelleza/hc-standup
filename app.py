@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta
+import logging
 import aiohttp
 from aiohttp import web
 from aiohttp_ac_hipchat.addon import create_addon_app, validate_jwt
@@ -15,6 +16,8 @@ import os
 GLANCE_MODULE_KEY = "hcstandup.glance"
 AVATAR_CACHE_KEY = "hipchat-avatar:{user_id}"
 USER_CACHE_KEY = "hipchat-user:{user_id}"
+
+log = logging.getLogger(__name__)
 
 app = create_addon_app(plugin_key="hc-standup",
                        addon_name="HC Standup",
@@ -99,6 +102,12 @@ def capabilities(request):
                     "key": "hcstandup.dialog",
                     "name": {
                         "value": "New report"
+                    },
+                    "target": {
+                        "type": "dialog",
+                        "title": "Create new report",
+                        "hint": "",
+                        "button": "Submit"
                     },
                     "location": "hipchat.sidebar.right",
                     "url": base_url + "/dialog"
@@ -405,9 +414,10 @@ def keep_alive(websocket, ping_period=30):
         yield from asyncio.sleep(ping_period)
 
         try:
+            log.debug("Ping websocket")
             websocket.ping()
         except Exception as e:
-            print('Got exception when trying to keep connection alive, '
+            log.warn('Got exception when trying to keep connection alive, '
                        'giving up.')
             return
 
@@ -415,36 +425,45 @@ ws_connections = set()
 
 @asyncio.coroutine
 def websocket_send_udpate(data):
+    log.debug("Send update to {0} WebSocket".format(len(ws_connections)))
     for ws_connection in ws_connections:
-        ws_connection.send_str(json.dumps(data))
+        try:
+            ws_connection.send_str(json.dumps(data))
+        except RuntimeError as e:
+            log.warn(e)
+            ws_connections.remove(ws_connection)
+
 
 @asyncio.coroutine
 @require_jwt(app)
 def websocket_handler(request):
-    ws = web.WebSocketResponse()
-    ws.start(request)
+    response = web.WebSocketResponse()
+    ok, protocol = response.can_start(request)
+    if not ok:
+        return web.Response(text="Can't start webSocket connection.")
 
-    asyncio.async(keep_alive(ws))
+    response.start(request)
 
-    ws_connections.add(ws)
+    # asyncio.async(keep_alive(response))
+
+    ws_connections.add(response)
+    log.debug("WebSocket connection open ({0} in total)".format(len(ws_connections)))
 
     while True:
-        msg = yield from ws.receive()
+        try:
+            msg = yield from response.receive()
 
-        if msg.tp == aiohttp.MsgType.text:
-            if msg.data == 'close':
-                yield from ws.close()
-            else:
-                ws.send_str(msg.data + '/answer')
-        elif msg.tp == aiohttp.MsgType.close:
-            ws_connections.remove(ws)
-            print('websocket connection closed')
-        elif msg.tp == aiohttp.MsgType.error:
-            ws_connections.remove(ws)
-            print('ws connection closed with exception %s',
-                  ws.exception())
+            if msg.tp == aiohttp.MsgType.close:
+                log.info("websocket connection closed")
+            elif msg.tp == aiohttp.MsgType.error:
+                log.warn("response connection closed with exception %s",
+                      response.exception())
+        except RuntimeError:
+            break
 
-    return ws
+    ws_connections.remove(response)
+
+    return response
 
 def status_to_view(status):
     msg_date = arrow.get(status['date'])

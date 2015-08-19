@@ -5,7 +5,7 @@
 
     var uri = new URI(baseUrl);
     var socket = new WebSocket((uri.protocol() === "https" ? "wss://" : "ws://") +
-            uri.hostname() + "/websocket?signed_request=" + signedRequest);
+            uri.hostname() +  (uri.port() ? (":" + uri.port()) : "") + "/websocket?signed_request=" + signedRequest);
 
     socket.onmessage = function(event) {
       var message = JSON.parse(event.data);
@@ -55,10 +55,7 @@
         };
 
         var roomId = $(e.target).data("room-id");
-        dialog.open({
-          integration: integration,
-          room_id: roomId
-        })
+        dialog.open({key: "hcstandup.dialog"})
       });
     });
   });
