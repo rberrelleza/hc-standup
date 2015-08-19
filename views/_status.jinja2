@@ -3,10 +3,10 @@
         <span class="aui-avatar aui-avatar-medium">
             <img src="{{status['user'].get('photo_url', '/static/silhouette_125.png')}}">
         </span>
-        <div class="">
+        <div class="content">
             <h1 class="author">{{status['user']['name']}}</h1>
             <div class="metadata">{{status['date']}}</div>
-            </div>
+        </div>
     </header>
     <div class="message">
         {{status['message_html']|safe}}

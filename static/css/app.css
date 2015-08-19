@@ -17,14 +17,12 @@ body {
 
 .header {
     margin-bottom: 10px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
-.header > div {
+.header .content {
     display: inline-block;
     margin-left: 5px;
+    width: calc(100% - 42px);
 }
 
 .header .aui-avatar img {
@@ -40,6 +38,12 @@ body {
     font-size: 12px;
     line-height: 12px;
     color: #999;
+}
+
+.header .metadata, .header .author {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .spinner-container {
