@@ -11,6 +11,7 @@ from aiohttp_ac_hipchat.util import http_request, allow_cross_origin
 import aiohttp_jinja2
 import aioredis
 import arrow
+import bleach
 import jinja2
 import markdown
 import os
@@ -382,7 +383,7 @@ def create_new_report_view(request):
         last_status = {
             "date": "Never",
             "user": user,
-            "message_html": markdown.markdown("**Yesterday I worked on:**   \n" +
+            "message_html": render_markdown_as_safe_html("**Yesterday I worked on:**   \n" +
                             """ ¯\\\_(ツ)\_/¯""")
         }
 
@@ -506,7 +507,7 @@ def websocket_handler(request):
 def status_to_view(status):
     msg_date = arrow.get(status['date'])
     message = status['message']
-    html = markdown.markdown(message)
+    html = render_markdown_as_safe_html(message)
 
     return {
         "date": msg_date.humanize(),
@@ -525,7 +526,7 @@ def render_status(status):
     msg_date = arrow.get(status['date'])
 
     message = status['message']
-    html = markdown.markdown(message)
+    html = render_markdown_as_safe_html(message)
     html = html.replace("<p>", "")
     html = html.replace("</p>", "")
     name = status['user']['name']
@@ -537,6 +538,12 @@ def status_spec(client):
         "group_id": client.group_id,
         "capabilities_url": client.capabilities_url
     }
+
+allowed_tags = bleach.ALLOWED_TAGS + ["p"]
+def render_markdown_as_safe_html(message):
+    html = markdown.markdown(message)
+
+    return bleach.clean(html, tags=allowed_tags, strip=True)
 
 def standup_db(app):
     return app['mongodb'].default_database['standup']
