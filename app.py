@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
 import logging
+from urllib.parse import urlparse
 import aiohttp
 from aiohttp import web
 from aiohttp_ac_hipchat.addon import create_addon_app, validate_jwt
@@ -8,6 +9,7 @@ from aiohttp_ac_hipchat.addon import require_jwt
 import json
 from aiohttp_ac_hipchat.util import http_request, allow_cross_origin
 import aiohttp_jinja2
+import aioredis
 import arrow
 import jinja2
 import markdown
@@ -25,6 +27,29 @@ app = create_addon_app(plugin_key="hc-standup",
 
 aiohttp_jinja2.setup(app, autoescape=True, loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(__file__), 'views')))
 
+
+@asyncio.coroutine
+def init_pub_sub():
+    redis_url = app['config'].get('REDIS_URL')
+    if not redis_url:
+        redis_url = 'redis://localhost:6379'
+
+    url = urlparse(redis_url)
+
+    db = 0
+    try:
+        if url.path:
+            db = int(url.path.replace('/', ''))
+    except (AttributeError, ValueError):
+        pass
+
+    sub = yield from aioredis.create_redis((url.hostname, url.port), db=db, password=url.password)
+    res = yield from sub.subscribe("updates:1")
+
+    tsk = asyncio.async(reader(res[0]))
+    # yield from tsk
+    # return reader(res[0])
+
 @asyncio.coroutine
 def init(app):
     @asyncio.coroutine
@@ -34,6 +59,7 @@ def init(app):
                                                     "you can use Markdown).")
 
     app['addon'].register_event('install', send_welcome)
+    yield from init_pub_sub()
 
 app.add_hook("before_first_request", init)
 
@@ -189,7 +215,7 @@ def clear_status(app, client, from_user, room):
 
     yield from client.send_notification(app['addon'], text="Status Cleared")
     yield from update_glance(app, client, room)
-    yield from websocket_send_udpate({
+    yield from send_udpate({
         "user_id": from_user["id"],
         "html": ""
     })
@@ -246,7 +272,7 @@ def update_sidebar(from_user, request, statuses, user_mention):
     html = aiohttp_jinja2.render_string("_status.jinja2", request, {
         "status": status_to_view(statuses[user_mention])
     }, app_key="aiohttp_jinja2_environment")
-    yield from websocket_send_udpate({
+    yield from send_udpate({
         "user_id": from_user["id"],
         "html": html
     })
@@ -409,7 +435,7 @@ def get_user(app, client, room_id, user_id):
     return user
 
 @asyncio.coroutine
-def keep_alive(websocket, ping_period=30):
+def keep_alive(websocket, ping_period=15):
     while True:
         yield from asyncio.sleep(ping_period)
 
@@ -424,11 +450,23 @@ def keep_alive(websocket, ping_period=30):
 ws_connections = set()
 
 @asyncio.coroutine
+def reader(channel):
+    while (yield from channel.wait_message()):
+        msg = yield from channel.get(encoding='utf-8')
+        yield from websocket_send_udpate(msg)
+
+@asyncio.coroutine
+def send_udpate(data):
+    log.debug("Publish update to Redis".format(len(ws_connections)))
+    with (yield from app['redis_pool']) as redis:
+        redis.publish("updates:1", json.dumps(data))
+
+@asyncio.coroutine
 def websocket_send_udpate(data):
     log.debug("Send update to {0} WebSocket".format(len(ws_connections)))
     for ws_connection in ws_connections:
         try:
-            ws_connection.send_str(json.dumps(data))
+            ws_connection.send_str(data)
         except RuntimeError as e:
             log.warn(e)
             ws_connections.remove(ws_connection)
@@ -444,7 +482,7 @@ def websocket_handler(request):
 
     response.start(request)
 
-    # asyncio.async(keep_alive(response))
+    asyncio.async(keep_alive(response))
 
     ws_connections.add(response)
     log.debug("WebSocket connection open ({0} in total)".format(len(ws_connections)))
