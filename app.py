@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 from datetime import datetime, timedelta
 import logging
 from urllib.parse import urlparse
@@ -45,11 +46,25 @@ def init_pub_sub():
         pass
 
     sub = yield from aioredis.create_redis((url.hostname, url.port), db=db, password=url.password)
+    app["redis_sub"] = sub
     res = yield from sub.subscribe("updates:1")
 
     tsk = asyncio.async(reader(res[0]))
     # yield from tsk
     # return reader(res[0])
+
+@asyncio.coroutine
+def subscribe_new_client(client_id, room_id):
+    chanel_key = "updates:{client_id}:{room_id}".format(client_id=client_id, room_id=room_id)
+    log.debug("Subscribe to {0}".format(chanel_key))
+    res = yield from app["redis_sub"].subscribe(chanel_key)
+    asyncio.async(reader(res[0]))
+
+@asyncio.coroutine
+def unsubscribe_client(client_id, room_id):
+    chanel_key = "updates:{client_id}:{room_id}".format(client_id=client_id, room_id=room_id)
+    log.debug("Unsubscribe to {0}".format(chanel_key))
+    res = yield from app["redis_sub"].unsubscribe(chanel_key)
 
 @asyncio.coroutine
 def init(app):
@@ -216,7 +231,7 @@ def clear_status(app, client, from_user, room):
 
     yield from client.send_notification(app['addon'], text="Status Cleared")
     yield from update_glance(app, client, room)
-    yield from send_udpate({
+    yield from send_udpate(client, room["id"], {
         "user_id": from_user["id"],
         "html": ""
     })
@@ -265,15 +280,15 @@ def record_status(app, client, from_user, status, room, request):
     yield from standup_db(app).update(spec, data, upsert=True)
     yield from client.send_notification(app['addon'], text="Status recorded.  Type '/standup' to see the full report.")
     yield from update_glance(app, client, room)
-    yield from update_sidebar(from_user, request, statuses, user_mention)
+    yield from update_sidebar(from_user, request, statuses, user_mention, client, room)
 
 
 @asyncio.coroutine
-def update_sidebar(from_user, request, statuses, user_mention):
+def update_sidebar(from_user, request, statuses, user_mention, client, room):
     html = aiohttp_jinja2.render_string("_status.jinja2", request, {
         "status": status_to_view(statuses[user_mention])
     }, app_key="aiohttp_jinja2_environment")
-    yield from send_udpate({
+    yield from send_udpate(client, room["id"], {
         "user_id": from_user["id"],
         "html": html
     })
@@ -448,7 +463,7 @@ def keep_alive(websocket, ping_period=15):
                        'giving up.')
             return
 
-ws_connections = set()
+ws_connections = defaultdict(lambda: defaultdict(set))
 
 @asyncio.coroutine
 def reader(channel):
@@ -457,17 +472,24 @@ def reader(channel):
         yield from websocket_send_udpate(msg)
 
 @asyncio.coroutine
-def send_udpate(data):
+def send_udpate(client, room_id, data):
     log.debug("Publish update to Redis".format(len(ws_connections)))
     with (yield from app['redis_pool']) as redis:
-        redis.publish("updates:1", json.dumps(data))
+        redis.publish_json("updates:1", {
+            "client_id": client.id,
+            "room_id": room_id,
+            "data": data,
+        })
 
 @asyncio.coroutine
-def websocket_send_udpate(data):
-    log.debug("Send update to {0} WebSocket".format(len(ws_connections)))
-    for ws_connection in ws_connections:
+def websocket_send_udpate(json_data):
+    data = json.loads(json_data)
+
+    ws_connections_for_room = ws_connections[data["client_id"]][data["room_id"]]
+    log.debug("Send update to {0} WebSocket".format(len(ws_connections_for_room)))
+    for ws_connection in ws_connections_for_room:
         try:
-            ws_connection.send_str(data)
+            ws_connection.send_str(json.dumps(data["data"]))
         except RuntimeError as e:
             log.warn(e)
             ws_connections.remove(ws_connection)
@@ -485,7 +507,14 @@ def websocket_handler(request):
 
     asyncio.async(keep_alive(response))
 
-    ws_connections.add(response)
+    client_id = request.client.id
+    room_id = request.jwt_data["context"]["room_id"]
+
+    ws_connections_for_room = ws_connections[client_id][room_id]
+    if len(ws_connections_for_room) == 0:
+        yield from subscribe_new_client(client_id, room_id)
+
+    ws_connections_for_room.add(response)
     log.debug("WebSocket connection open ({0} in total)".format(len(ws_connections)))
 
     while True:
@@ -500,7 +529,11 @@ def websocket_handler(request):
         except RuntimeError:
             break
 
-    ws_connections.remove(response)
+    ws_connections_for_room = ws_connections.get(client_id).get(room_id)
+    ws_connections_for_room.remove(response)
+
+    if len(ws_connections_for_room) == 0:
+        yield from unsubscribe_client(client_id, room_id)
 
     return response
 
