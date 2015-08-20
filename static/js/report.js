@@ -44,18 +44,10 @@
     $(".create-new-button").click(function(e) {
 
       AP.require('dialog', function(dialog) {
-        var integration = {
-          addon_key: "hc-standup",
-          full_key: "hc-standup:hcstandup.dialog",
+        dialog.open({
           key: "hcstandup.dialog",
-          type: "webPanel",
-          name: "Create new report",
-          options: {},
-          url: baseUrl + "/dialog"
-        };
-
-        var roomId = $(e.target).data("room-id");
-        dialog.open({key: "hcstandup.dialog"})
+          //button: "Submit"
+        });
       });
     });
   });
