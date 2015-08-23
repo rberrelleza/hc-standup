@@ -240,6 +240,9 @@ def clear_status(app, client, from_user, room):
 def display_one_status(app, client, mention_name):
     spec, statuses = yield from find_statuses(app, client)
 
+    if mention_name.startswith("@"):
+        mention_name = mention_name[1:]
+
     status = statuses.get(mention_name)
     if status:
         yield from client.send_notification(app['addon'], html=render_status(status))
@@ -258,7 +261,7 @@ def display_all_statuses(app, client):
                                                         "Type '/standup I did this' to add your own status.")
 
 @asyncio.coroutine
-def record_status(app, client, from_user, status, room, request):
+def record_status(app, client, from_user, status, room, request, send_notification=True):
     spec, statuses = yield from find_statuses(app, client)
 
     user_mention = from_user['mention_name']
@@ -278,7 +281,9 @@ def record_status(app, client, from_user, status, room, request):
     data['users'] = statuses
 
     yield from standup_db(app).update(spec, data, upsert=True)
-    yield from client.send_notification(app['addon'], text="Status recorded.  Type '/standup' to see the full report.")
+
+    if send_notification:
+        yield from client.send_notification(app['addon'], text="Status recorded.  Type '/standup' to see the full report.")
     yield from update_glance(app, client, room)
     yield from update_sidebar(from_user, request, statuses, user_mention, client, room)
 
@@ -430,7 +435,7 @@ def create_new_report(request):
     if not from_user:
         return web.Response(status=401)
     else:
-        yield from record_status(app, request.client, from_user, status, room, request)
+        yield from record_status(app, request.client, from_user, status, room, request, send_notification=False)
         return web.Response(status=204)
 
 @asyncio.coroutine
