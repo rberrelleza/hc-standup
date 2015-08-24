@@ -6,8 +6,9 @@ aiohttp==0.17.2
 -e git+https://bitbucket.org/atlassianlabs/aiohttp_ac_hipchat.git#egg=aiohttp_ac_hipchat
 aiohttp-jinja2==0.5.0
 arrow==0.6.0
-asyncio-mongo==0.2.3
-asyncio-redis==0.14.1
+asyncio-mongo==0.2.4
+#asyncio-redis==0.14.1
+-e git+https://github.com/mrdon/asyncio-redis.git#egg=asyncio-redis-mrdon
 bleach==1.4.1
 cchardet==0.3.5
 chardet==2.3.0

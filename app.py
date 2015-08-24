@@ -446,7 +446,7 @@ def create_new_report(request):
 def get_user(app, client, room_id, user_id):
     user_key = USER_CACHE_KEY.format(group_id=client.group_id, user_id=user_id)
     cached_data = (yield from app['redis_pool'].get(user_key))
-    user = json.loads(cached_data.decode(encoding="utf-8")) if cached_data else None
+    user = json.loads(cached_data) if cached_data else None
 
     if not user:
         room_participants = yield from get_room_participants(app, client, room_id)
