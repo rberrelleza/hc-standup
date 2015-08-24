@@ -18,8 +18,7 @@ import markdown
 import os
 
 GLANCE_MODULE_KEY = "hcstandup.glance"
-AVATAR_CACHE_KEY = "hipchat-avatar:{user_id}"
-USER_CACHE_KEY = "hipchat-user:{user_id}"
+USER_CACHE_KEY = "hipchat-user:{group_id}:{user_id}"
 
 log = logging.getLogger(__name__)
 
@@ -321,8 +320,11 @@ def get_room_participants(app, client, room_id_or_name):
             room_participants = body['items']
 
             for room_participant in room_participants:
-                cache_key = USER_CACHE_KEY.format(user_id=room_participant['id'])
-                redis_pool.setex(key=cache_key, value=json.dumps(room_participant), seconds=3600)
+                cache_key = USER_CACHE_KEY.format(group_id=client.group_id, user_id=room_participant['id'])
+                subset_room_participant = {k: room_participant.get(k, None) for k in ('id', 'name', 'mention_name',
+                                                                                      'photo_url', 'xmpp_jid',
+                                                                                      'timezone')}
+                yield from redis_pool.setex(key=cache_key, value=json.dumps(subset_room_participant), seconds=3600)
 
             return room_participants
 
@@ -442,9 +444,7 @@ def create_new_report(request):
 
 @asyncio.coroutine
 def get_user(app, client, room_id, user_id):
-    user = None
-
-    user_key = USER_CACHE_KEY.format(user_id=user_id)
+    user_key = USER_CACHE_KEY.format(group_id=client.group_id, user_id=user_id)
     cached_data = (yield from app['redis_pool'].get(user_key))
     user = json.loads(cached_data.decode(encoding="utf-8")) if cached_data else None
 
