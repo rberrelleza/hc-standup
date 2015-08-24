@@ -1,4 +1,5 @@
 import asyncio
+import asyncio_redis
 from collections import defaultdict
 from datetime import datetime, timedelta
 import logging
@@ -10,7 +11,6 @@ from aiohttp_ac_hipchat.addon import require_jwt
 import json
 from aiohttp_ac_hipchat.util import http_request, allow_cross_origin
 import aiohttp_jinja2
-import aioredis
 import arrow
 import bleach
 import jinja2
@@ -48,26 +48,24 @@ def init_pub_sub():
     except (AttributeError, ValueError):
         pass
 
-    sub = yield from aioredis.create_redis((url.hostname, url.port), db=db, password=url.password)
+    connection = yield from asyncio_redis.Connection.create(host=url.hostname, port=url.port, password=url.password,
+                                                            db=db)
+    sub = yield from connection.start_subscribe()
     app["redis_sub"] = sub
-    res = yield from sub.subscribe("updates:1")
 
-    tsk = asyncio.async(reader(res[0]))
-    # yield from tsk
-    # return reader(res[0])
+    asyncio.async(reader(sub))
 
 @asyncio.coroutine
 def subscribe_new_client(client_id, room_id):
     chanel_key = "updates:{client_id}:{room_id}".format(client_id=client_id, room_id=room_id)
     log.debug("Subscribe to {0}".format(chanel_key))
-    res = yield from app["redis_sub"].subscribe(chanel_key)
-    asyncio.async(reader(res[0]))
+    yield from app["redis_sub"].subscribe([chanel_key])
 
 @asyncio.coroutine
 def unsubscribe_client(client_id, room_id):
     chanel_key = "updates:{client_id}:{room_id}".format(client_id=client_id, room_id=room_id)
     log.debug("Unsubscribe to {0}".format(chanel_key))
-    res = yield from app["redis_sub"].unsubscribe(chanel_key)
+    yield from app["redis_sub"].unsubscribe([chanel_key])
 
 @asyncio.coroutine
 def init(app):
@@ -322,10 +320,9 @@ def get_room_participants(app, client, room_id_or_name):
             body = yield from resp.read(decode=True)
             room_participants = body['items']
 
-            with (yield from redis_pool) as redis:
-                for room_participant in room_participants:
-                    cache_key = USER_CACHE_KEY.format(user_id=room_participant['id'])
-                    redis.setex(key=cache_key, value=json.dumps(room_participant), seconds=3600)
+            for room_participant in room_participants:
+                cache_key = USER_CACHE_KEY.format(user_id=room_participant['id'])
+                redis_pool.setex(key=cache_key, value=json.dumps(room_participant), seconds=3600)
 
             return room_participants
 
@@ -448,9 +445,8 @@ def get_user(app, client, room_id, user_id):
     user = None
 
     user_key = USER_CACHE_KEY.format(user_id=user_id)
-    with (yield from app['redis_pool']) as redis:
-        cached_data = (yield from redis.get(user_key))
-        user = json.loads(cached_data.decode(encoding="utf-8")) if cached_data else None
+    cached_data = (yield from app['redis_pool'].get(user_key))
+    user = json.loads(cached_data.decode(encoding="utf-8")) if cached_data else None
 
     if not user:
         room_participants = yield from get_room_participants(app, client, room_id)
@@ -476,20 +472,21 @@ def keep_alive(websocket, ping_period=15):
 ws_connections = defaultdict(lambda: defaultdict(set))
 
 @asyncio.coroutine
-def reader(channel):
-    while (yield from channel.wait_message()):
-        msg = yield from channel.get(encoding='utf-8')
-        yield from websocket_send_udpate(msg)
+def reader(subscriber):
+    while True:
+        reply = yield from subscriber.next_published()
+        yield from websocket_send_udpate(reply.value)
 
 @asyncio.coroutine
 def send_udpate(client, room_id, data):
-    log.debug("Publish update to Redis".format(len(ws_connections)))
-    with (yield from app['redis_pool']) as redis:
-        redis.publish_json("updates:1", {
-            "client_id": client.id,
-            "room_id": room_id,
-            "data": data,
-        })
+    chanel_key = "updates:{client_id}:{room_id}".format(client_id=client.id, room_id=room_id)
+    log.debug("Publish update to Redis channel {0}".format(chanel_key))
+    nb_clients = yield from app['redis_pool'].publish(chanel_key, json.dumps({
+        "client_id": client.id,
+        "room_id": room_id,
+        "data": data,
+    }))
+    log.debug("Published to {0} clients".format(nb_clients))
 
 @asyncio.coroutine
 def websocket_send_udpate(json_data):
