@@ -462,10 +462,9 @@ def keep_alive(websocket, ping_period=15):
         yield from asyncio.sleep(ping_period)
 
         try:
-            log.debug("Ping websocket")
             websocket.ping()
         except Exception as e:
-            log.warn('Got exception when trying to keep connection alive, '
+            log.debug('Got exception when trying to keep connection alive, '
                        'giving up.')
             return
 
