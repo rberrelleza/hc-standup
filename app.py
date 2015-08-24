@@ -23,9 +23,12 @@ USER_CACHE_KEY = "hipchat-user:{user_id}"
 
 log = logging.getLogger(__name__)
 
+SCOPES_V2 = ["view_group", "send_notification", "view_room"]
+
 app = create_addon_app(plugin_key="hc-standup",
                        addon_name="HC Standup",
-                       from_name="Standup")
+                       from_name="Standup",
+                       scopes=SCOPES_V2)
 
 aiohttp_jinja2.setup(app, autoescape=True, loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(__file__), 'views')))
 
@@ -103,11 +106,7 @@ def capabilities(request):
                 "callbackUrl": base_url + "/installable"
             },
             "hipchatApiConsumer": {
-                "scopes": [
-                    "view_group",
-                    "send_notification",
-                    "view_room"
-                ],
+                "scopes": SCOPES_V2,
                 "fromName": config.get("FROM_NAME")
             },
             "webhook": [
@@ -302,15 +301,18 @@ def update_sidebar(from_user, request, statuses, user_mention, client, room):
 @asyncio.coroutine
 def get_photo_url(client, user_id, room_id):
     user = (yield from get_user(app, client, room_id, user_id))
-    photo_url = user['photo_url']
+    photo_url = user['photo_url'] if user else None
     if not photo_url:
-        app.config.get("BASE_URL") + "/static/silhouette_125.png"
+        photo_url = None
 
     return photo_url
 
 @asyncio.coroutine
 def get_room_participants(app, client, room_id_or_name):
     redis_pool = app['redis_pool']
+    if not client.has_scope("view_room"):
+        return []
+
     token = yield from client.get_token(redis_pool, scopes=['view_room'])
     with (yield from http_request('GET', "%s/room/%s/participant?expand=items" % (client.api_base_url, room_id_or_name),
                                   headers={'content-type': 'application/json',
@@ -339,6 +341,9 @@ def update_glance(app, client, room):
 
 @asyncio.coroutine
 def push_glance_update(app, client, room_id_or_name, glance):
+    if not client.has_scope("view_room"):
+        return
+
     token = yield from client.get_token(app['redis_pool'], scopes=['view_room'])
     with (yield from http_request('POST', "%s/addon/ui/room/%s" % (client.api_base_url, room_id_or_name),
                                   headers={'content-type': 'application/json',
