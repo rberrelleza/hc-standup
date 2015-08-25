@@ -57,6 +57,10 @@ body {
     white-space: nowrap;
 }
 
+.status .message {
+    word-wrap: break-word;
+}
+
 .spinner-container {
     position: absolute;
     top: 100px;
@@ -64,7 +68,7 @@ body {
 
 .statuses-container {
     flex: 1;
-    overflow-y: scroll;
+    overflow-y: auto;
 }
 
 footer {
