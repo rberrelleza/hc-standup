@@ -63,7 +63,8 @@ body {
 
 .spinner-container {
     position: absolute;
-    top: 100px;
+    top: calc(50% - 50px);
+    left: 50%;
 }
 
 .statuses-container {
