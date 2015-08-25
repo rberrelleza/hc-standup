@@ -5,18 +5,22 @@
     <script src="static/js/report.js"></script>
 {% endblock %}
 {% block content %}
-    <ul class="statuses">
-    </ul>
-    <div class="spinner-container"></div>
-    <footer>
-        <div>
-            {% if create_new_report_enabled %}
-            <button class="aui-button aui-button-subtle create-new-button"
-                    data-room-id={{room_id}}>
-                <span class="aui-icon aui-icon-small aui-iconfont-add">Create</span>
-                &nbsp;Create new report
-            </button>
-            {% endif %}
+    <div class="report">
+        <div class="statuses-container">
+            <ul class="statuses">
+            </ul>
         </div>
-    </footer>
+        <div class="spinner-container"></div>
+        <footer>
+            <div>
+                {% if create_new_report_enabled %}
+                    <button class="aui-button aui-button-subtle create-new-button"
+                            data-room-id={{room_id}}>
+                        <span class="aui-icon aui-icon-small aui-iconfont-add">Create</span>
+                        &nbsp;Create new report
+                    </button>
+                {% endif %}
+            </div>
+        </footer>
+    </div>
 {% endblock %}

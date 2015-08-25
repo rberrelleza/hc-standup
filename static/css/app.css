@@ -1,5 +1,16 @@
+html {
+    height: 100%;
+}
+
 body {
     background: white;
+    height: 100%;
+}
+
+.report {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 .statuses {
@@ -47,13 +58,19 @@ body {
 }
 
 .spinner-container {
-    margin-top: 100px;
+    position: absolute;
+    top: 100px;
+}
+
+.statuses-container {
+    flex: 1;
+    overflow-y: scroll;
 }
 
 footer {
-    position: absolute;
-    bottom: 0;
     padding: 10px;
+    justify-content: flex-end;
+    border-top: 1px solid #ccc;
 }
 
 .create-dialog .aui-group {
