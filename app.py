@@ -1,4 +1,5 @@
 import asyncio
+from functools import wraps
 import asyncio_redis
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -17,10 +18,21 @@ import jinja2
 import markdown
 import os
 
+class RequestIdLoggerAdapter(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        if "request" in kwargs:
+            request = kwargs.pop("request")
+            if request:
+                request_id = request.headers.get("HTTP_X_REQUEST_ID", None)
+                return "{msg} request_id={request_id}".format(msg=msg, request_id=request_id), kwargs
+
+        return super().process(msg, kwargs)
+
+
 GLANCE_MODULE_KEY = "hcstandup.glance"
 USER_CACHE_KEY = "hipchat-user:{group_id}:{user_id}"
 
-log = logging.getLogger(__name__)
+log = RequestIdLoggerAdapter(logging.getLogger(__name__), {})
 
 SCOPES_V2 = ["view_group", "send_notification", "view_room"]
 
@@ -30,6 +42,18 @@ app = create_addon_app(plugin_key="hc-standup",
                        scopes=SCOPES_V2)
 
 aiohttp_jinja2.setup(app, autoescape=True, loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(__file__), 'views')))
+
+def logged(func):
+    @asyncio.coroutine
+    @wraps(func)
+    def inner(*args, **kwargs):
+        log.debug("[ENTER] {func_name}".format(func_name=func.__name__), request=kwargs.get("request", None))
+        result = (yield from func(*args, **kwargs))
+        log.debug("[EXIT] {func_name}".format(func_name=func.__name__), request=kwargs.get("request", None))
+        return result
+
+    return inner
+
 
 
 @asyncio.coroutine
@@ -172,6 +196,7 @@ def glance_json(statuses):
         }
     }
 
+@logged
 @asyncio.coroutine
 def find_statuses(app, client):
     spec = status_spec(client)
@@ -191,6 +216,7 @@ def find_statuses(app, client):
 
     return spec, statuses
 
+@logged
 @asyncio.coroutine
 def standup_webhook(request):
     addon = request.app['addon']
@@ -226,7 +252,7 @@ def clear_status(app, client, from_user, room):
     yield from standup_db(app).update(spec, data, upsert=True)
 
     yield from client.send_notification(app['addon'], text="Status Cleared")
-    yield from update_glance(app, client, room)
+    yield from update_glance(app, client, room, statuses)
     yield from send_udpate(client, room["id"], {
         "user_id": from_user["id"],
         "html": ""
@@ -284,6 +310,7 @@ def record_status(app, client, from_user, status, room, request, send_notificati
     yield from update_sidebar(from_user, request, statuses, user_mention, client, room)
 
 
+@logged
 @asyncio.coroutine
 def update_sidebar(from_user, request, statuses, user_mention, client, room):
     html = aiohttp_jinja2.render_string("_status.jinja2", request, {
@@ -328,6 +355,7 @@ def get_room_participants(app, client, room_id_or_name):
 
             return room_participants
 
+@logged
 @asyncio.coroutine
 def update_glance(app, client, room):
     spec, statuses = yield from find_statuses(app, client)
