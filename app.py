@@ -22,7 +22,7 @@ class RequestIdLoggerAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
         if "request" in kwargs:
             request = kwargs.pop("request")
-            if request:
+            if request is not None:
                 request_id = request.headers.get("HTTP_X_REQUEST_ID", None)
                 return "{msg} request_id={request_id}".format(msg=msg, request_id=request_id), kwargs
 
@@ -47,9 +47,13 @@ def logged(func):
     @asyncio.coroutine
     @wraps(func)
     def inner(*args, **kwargs):
-        log.debug("[ENTER] {func_name}".format(func_name=func.__name__), request=kwargs.get("request", None))
+        request = None
+        if len(args) == 1 and isinstance(args[0], aiohttp.web.Request):
+            request = args[0]
+
+        log.debug("[ENTER] {func_name}".format(func_name=func.__name__), request=request)
         result = (yield from func(*args, **kwargs))
-        log.debug("[EXIT] {func_name}".format(func_name=func.__name__), request=kwargs.get("request", None))
+        log.debug("[EXIT] {func_name}".format(func_name=func.__name__), request=request)
         return result
 
     return inner
@@ -180,6 +184,7 @@ def capabilities(request):
 
     return response
 
+@logged
 @asyncio.coroutine
 @require_jwt(app)
 @allow_cross_origin
@@ -381,6 +386,7 @@ def push_glance_update(app, client, room_id_or_name, glance):
             body = yield from resp.read(decode=True)
             return body['items']
 
+@logged
 @asyncio.coroutine
 @require_jwt(app)
 @aiohttp_jinja2.template('report.jinja2')
@@ -395,6 +401,7 @@ def report_view(request):
         "create_new_report_enabled": os.environ.get("create_new_report_enabled", False)
     }
 
+@logged
 @asyncio.coroutine
 @require_jwt(app)
 def get_statuses(request):
@@ -402,6 +409,7 @@ def get_statuses(request):
 
     web.Response(text=json.dumps(glance_json(statuses)))
 
+@logged
 @asyncio.coroutine
 @require_jwt(app)
 @aiohttp_jinja2.template('statuses.jinja2')
@@ -415,6 +423,7 @@ def get_statuses_view(request):
         "statuses": results
     }
 
+@logged
 @asyncio.coroutine
 @require_jwt(app)
 @aiohttp_jinja2.template('create.jinja2')
@@ -450,6 +459,7 @@ def create_new_report_view(request):
     }
 
 
+@logged
 @asyncio.coroutine
 @require_jwt(app)
 def create_new_report(request):
