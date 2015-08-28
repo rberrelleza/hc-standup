@@ -23,7 +23,7 @@ class RequestIdLoggerAdapter(logging.LoggerAdapter):
         if "request" in kwargs:
             request = kwargs.pop("request")
             if request is not None:
-                request_id = request.headers.get("HTTP_X_REQUEST_ID", None)
+                request_id = request.headers.get("X-Request-ID", None)
                 return "{msg} request_id={request_id}".format(msg=msg, request_id=request_id), kwargs
 
         return super().process(msg, kwargs)
