@@ -249,7 +249,8 @@ def clear_status(app, client, from_user, room):
     spec, statuses = yield from find_statuses(app, client)
 
     user_mention = from_user['mention_name']
-    del statuses[user_mention]
+    if user_mention in statuses:
+        del statuses[user_mention]
 
     data = dict(spec)
     data['users'] = statuses
@@ -257,7 +258,7 @@ def clear_status(app, client, from_user, room):
     yield from standup_db(app).update(spec, data, upsert=True)
 
     yield from client.send_notification(app['addon'], text="Status Cleared")
-    yield from update_glance(app, client, room, statuses)
+    yield from update_glance(app, client, room)
     yield from send_udpate(client, room["id"], {
         "user_id": from_user["id"],
         "html": ""
