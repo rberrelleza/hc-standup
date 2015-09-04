@@ -228,19 +228,21 @@ def standup_webhook(request):
     body = yield from request.json()
     client_id = body['oauth_client_id']
     client = yield from addon.load_client(client_id)
+    if client:
+        status = str(body['item']["message"]["message"][len("/standup"):]).strip()
+        from_user = body['item']['message']['from']
+        room = body['item']['room']
 
-    status = str(body['item']["message"]["message"][len("/standup"):]).strip()
-    from_user = body['item']['message']['from']
-    room = body['item']['room']
-
-    if not status:
-        yield from display_all_statuses(app, client)
-    elif status.startswith("@") and ' ' not in status:
-        yield from display_one_status(app, client, mention_name=status)
-    elif status == "clear":
-        yield from clear_status(app, client, from_user, room)
+        if not status:
+            yield from display_all_statuses(app, client)
+        elif status.startswith("@") and ' ' not in status:
+            yield from display_one_status(app, client, mention_name=status)
+        elif status == "clear":
+            yield from clear_status(app, client, from_user, room)
+        else:
+            yield from record_status(app, client, from_user, status, room, request)
     else:
-        yield from record_status(app, client, from_user, status, room, request)
+        log.info("Unknown oauth client id {oauth_client_id}".format(oauth_client_id=client_id))
 
     return web.Response(status=204)
 
