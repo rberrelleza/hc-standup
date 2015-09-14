@@ -313,7 +313,12 @@ def record_status(app, client, from_user, status, room, request, send_notificati
     yield from standup_db(app).update(spec, data, upsert=True)
 
     if send_notification:
-        yield from client.send_notification(app['addon'], text="Status recorded.  Type '/standup' to see the full report.")
+        user_name=from_user.get('name',None)
+        if user_name:
+            message_text = user_name + " has submitted the standup report. Type '/standup' to see the full report."
+        else:
+            message_text = "Status recorded. Type '/standup' to see the full report."
+        yield from client.send_notification(app['addon'], text=message_text)
     yield from update_glance(app, client, room)
     yield from update_sidebar(from_user, request, statuses, user_mention, client, room)
 
@@ -480,7 +485,7 @@ def create_new_report(request):
     if not from_user:
         return web.Response(status=401)
     else:
-        yield from record_status(app, request.client, from_user, status, room, request, send_notification=False)
+        yield from record_status(app, request.client, from_user, status, room, request)
         return web.Response(status=204)
 
 @asyncio.coroutine
