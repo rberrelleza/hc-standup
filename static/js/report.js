@@ -45,8 +45,7 @@
 
       AP.require('dialog', function(dialog) {
         dialog.open({
-          key: "hcstandup.dialog",
-          button: "Submit"
+          key: "hcstandup.dialog"
         });
       });
     });

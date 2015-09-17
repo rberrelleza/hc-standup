@@ -1,4 +1,5 @@
 import asyncio
+import base64
 from functools import wraps
 import asyncio_redis
 from collections import defaultdict
@@ -34,6 +35,7 @@ USER_CACHE_KEY = "hipchat-user:{group_id}:{user_id}"
 
 log = RequestIdLoggerAdapter(logging.getLogger(__name__), {})
 
+SCOPES_V1 = ["view_group", "send_notification"]
 SCOPES_V2 = ["view_group", "send_notification", "view_room"]
 
 app = create_addon_app(plugin_key="hc-standup",
@@ -110,9 +112,12 @@ app.add_hook("before_first_request", init)
 @asyncio.coroutine
 def capabilities(request):
 
+    hipchat_server = yield from is_hipchat_server(request)
+
     config = request.app["config"]
     base_url = config["BASE_URL"]
-    response = web.Response(text=json.dumps({
+
+    descriptor = {
         "links": {
             "self": base_url,
             "homepage": base_url
@@ -127,11 +132,9 @@ def capabilities(request):
         "capabilities": {
             "installable": {
                 "allowGlobal": False,
-                "allowRoom": True,
-                "callbackUrl": base_url + "/installable"
+                "allowRoom": True
             },
             "hipchatApiConsumer": {
-                "scopes": SCOPES_V2,
                 "fromName": config.get("FROM_NAME")
             },
             "webhook": [
@@ -140,7 +143,13 @@ def capabilities(request):
                     "event": "room_message",
                     "pattern": "^/(?:status|standup)(\s|$).*"
                 }
-            ],
+            ]
+        }
+    }
+
+    if hipchat_server:
+        descriptor["capabilities"]["hipchatApiConsumer"]["scopes"] = SCOPES_V2
+        descriptor["capabilities"].update({
             "glance": [
                 {
                     "key": GLANCE_MODULE_KEY,
@@ -155,6 +164,28 @@ def capabilities(request):
                     }
                 }
             ],
+            "dialog": [
+                {
+                    "key": "hcstandup.dialog",
+                    "title": {
+                        "value": "New report"
+                    },
+                    "url": base_url + "/dialog",
+                    "options": {
+                        "primaryAction": {
+                            "name": {
+                                "value": "Submit",
+                            },
+                            "key": "hcstandup.dialog.submit",
+                            "enabled": True
+                        },
+                        "size": {
+                            "width": "600px",
+                            "height": "200px"
+                        }
+                    }
+                }
+            ],
             "webPanel": [
                 {
                     "key": "hcstandup.sidebar",
@@ -163,26 +194,39 @@ def capabilities(request):
                     },
                     "location": "hipchat.sidebar.right",
                     "url": base_url + "/report"
-                },
-                {
-                    "key": "hcstandup.dialog",
-                    "name": {
-                        "value": "New report"
-                    },
-                    "target": {
-                        "type": "dialog",
-                        "title": "Create new report",
-                        "hint": "",
-                        "button": "Submit"
-                    },
-                    "location": "hipchat.sidebar.right",
-                    "url": base_url + "/dialog"
                 }
             ]
-        }
-    }))
+        })
+    else:
+        descriptor["capabilities"]["hipchatApiConsumer"]["scopes"] = SCOPES_V1
+
+    installable_data = {
+        "scopes": descriptor["capabilities"]["hipchatApiConsumer"]["scopes"]
+    }
+    descriptor["capabilities"]["installable"]["callbackUrl"] = base_url + "/installable/" + \
+                                                               base64.urlsafe_b64encode(json.dumps(installable_data).encode("utf-8")).decode("utf-8")
+
+    response = web.Response(text=json.dumps(descriptor))
 
     return response
+
+
+def is_hipchat_server(request):
+    hipchat_server = True
+    forwarded_for = request.headers.get('X-FORWARDED-FOR')
+    is_ngrok = request.headers['HOST'] and "ngrok" in request.headers['HOST']
+    if forwarded_for and not is_ngrok:
+        try:
+            resp = (
+            yield from asyncio.wait_for(aiohttp.request("GET", "http://{ip}/v2/capabilities".format(ip=forwarded_for)),
+                                        timeout=1))
+            capdoc = yield from resp.read(decode=True)
+            hipchat_server = capdoc["links"]["self"] == "https://api.hipchat.com/v2/capabilities"
+        except:
+            hipchat_server = False
+
+    return hipchat_server
+
 
 @logged
 @asyncio.coroutine
