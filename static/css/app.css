@@ -1,0 +1,119 @@
+html {
+    height: 100%;
+}
+
+body {
+    background: white;
+}
+
+.report-sidebar {
+    height: 100%;
+}
+
+.report {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.statuses {
+    list-style-type: none;
+    padding: 0;
+}
+
+.status {
+    padding: 10px 20px;
+}
+
+.statuses .status {
+    border-bottom: 1px solid #ccc;
+}
+
+.header {
+    margin-bottom: 10px;
+}
+
+.header .content {
+    display: inline-block;
+    margin-left: 5px;
+    width: calc(100% - 42px);
+}
+
+.header .aui-avatar img {
+    border-radius: 100%;
+}
+
+.header .author {
+    font-size: 16px;
+    line-height: 16px;
+}
+
+.header .metadata {
+    font-size: 12px;
+    line-height: 12px;
+    color: #999;
+}
+
+.header .metadata, .header .author {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.status .message {
+    word-wrap: break-word;
+}
+
+.spinner-container {
+    position: absolute;
+    top: calc(50% - 50px);
+    left: 50%;
+}
+
+.statuses-container {
+    flex: 1;
+    overflow-y: auto;
+}
+
+footer {
+    padding: 10px;
+    justify-content: flex-end;
+    border-top: 1px solid #ccc;
+}
+
+.create-dialog {
+    margin: 20px;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+}
+
+.create-dialog .aui-group {
+    margin: 0;
+    height: 100%;
+    min-height: 100px;
+}
+
+.create-dialog .status {
+    padding: 0;
+}
+
+.create-dialog .last-status {
+    width: 200px;
+}
+
+.create-dialog .report-input, .create-dialog .aui textarea.textarea, .create-dialog form {
+    height: 100%;
+    width: 100%;
+    max-width: none;
+}
+
+.create-dialog textarea {
+    resize: none;
+}
+
+.create-dialog form.aui .buttons-container {
+    padding: 4px 0;
+}

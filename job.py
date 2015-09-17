@@ -1,9 +1,9 @@
 import asyncio
 from datetime import datetime
+from aiohttp_ac_hipchat.util import http_request
 from pytz import timezone, utc
 import sys
 
-from bottle_ac import http_request
 import app
 
 

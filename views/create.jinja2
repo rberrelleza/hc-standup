@@ -1,0 +1,22 @@
+{% extends "base.jinja2" %}
+{% block title %}Report{% endblock %}
+{% block head %}
+    {{ super() }}
+    <script src="static/js/dialog.js"></script>
+{% endblock %}
+{% block bodyClasses %}create-dialog{% endblock %}
+{% block content %}
+    <div class="aui-group">
+        <div class="aui-item last-status">
+            {% if status %}
+                {% include('_status.jinja2') %}
+            {% endif %}
+        </div>
+        <div class="aui-item report-input">
+            <form class="aui">
+                <textarea class="textarea" autofocus name="message">{{report_template}}</textarea>
+                <input type="hidden" name="csrf_token" value="{{csrf_token}}">
+            </form>
+        </div>
+    </div>
+{% endblock %}
