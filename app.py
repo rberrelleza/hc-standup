@@ -1,5 +1,4 @@
 import asyncio
-import base64
 from functools import wraps
 import asyncio_redis
 from collections import defaultdict
@@ -8,10 +7,9 @@ import logging
 from urllib.parse import urlparse
 import aiohttp
 from aiohttp import web
-from aiohttp_ac_hipchat.addon import create_addon_app, validate_jwt
-from aiohttp_ac_hipchat.addon import require_jwt
+from aiohttp_ac_hipchat.addon_app import create_addon_app
 import json
-from aiohttp_ac_hipchat.util import http_request, allow_cross_origin
+from aiohttp_ac_hipchat.util import http_request
 import aiohttp_jinja2
 import arrow
 import bleach
@@ -38,10 +36,15 @@ log = RequestIdLoggerAdapter(logging.getLogger(__name__), {})
 SCOPES_V1 = ["view_group", "send_notification"]
 SCOPES_V2 = ["view_group", "send_notification", "view_room"]
 
-app = create_addon_app(plugin_key="hc-standup",
-                       addon_name="HC Standup",
-                       from_name="Standup",
-                       scopes=SCOPES_V2)
+def get_scopes(context):
+    return SCOPES_V2 if context.get("hipchat_server", False) else SCOPES_V1
+
+app, addon = create_addon_app(addon_key="hc-standup",
+                              addon_name="HC Standup",
+                              vendor_name="Atlassian",
+                              vendor_url="https://atlassian.com",
+                              from_name="Standup",
+                              scopes=get_scopes)
 
 aiohttp_jinja2.setup(app, autoescape=True, loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(__file__), 'views')))
 
@@ -59,8 +62,6 @@ def logged(func):
         return result
 
     return inner
-
-
 
 @asyncio.coroutine
 def init_pub_sub():
@@ -101,7 +102,7 @@ def init(app):
     @asyncio.coroutine
     def send_welcome(event):
         client = event['client']
-        yield from client.send_notification(app['addon'], text="HC Standup was added to this room. Type '/standup I did *this*' to get started (yes, "
+        yield from client.room_client.send_notification(text="HC Standup was added to this room. Type '/standup I did *this*' to get started (yes, "
                                                     "you can use Markdown).")
 
     app['addon'].register_event('install', send_welcome)
@@ -109,129 +110,12 @@ def init(app):
 
 app.add_hook("before_first_request", init)
 
-@asyncio.coroutine
-def capabilities(request):
-
-    hipchat_server = yield from is_hipchat_server(request)
-
-    config = request.app["config"]
-    base_url = config["BASE_URL"]
-
-    descriptor = {
-        "links": {
-            "self": base_url,
-            "homepage": base_url
-        },
-        "key": config.get("PLUGIN_KEY"),
-        "name": config.get("ADDON_NAME"),
-        "description": "HipChat connect add-on that supports async standups",
-        "vendor": {
-            "name": "Atlassian Labs",
-            "url": "https://atlassian.com"
-        },
-        "capabilities": {
-            "installable": {
-                "allowGlobal": False,
-                "allowRoom": True
-            },
-            "hipchatApiConsumer": {
-                "fromName": config.get("FROM_NAME")
-            },
-            "webhook": [
-                {
-                    "url": base_url + "/standup",
-                    "event": "room_message",
-                    "pattern": "^/(?:status|standup)(\s|$).*"
-                }
-            ]
-        }
-    }
-
-    if hipchat_server:
-        descriptor["capabilities"]["hipchatApiConsumer"]["scopes"] = SCOPES_V2
-        descriptor["capabilities"].update({
-            "glance": [
-                {
-                    "key": GLANCE_MODULE_KEY,
-                    "name": {
-                        "value": "Standup"
-                    },
-                    "queryUrl": base_url + "/glance",
-                    "target": "hcstandup.sidebar",
-                    "icon": {
-                        "url": base_url + "/static/info.png",
-                        "url@2x": base_url + "/static/info@2x.png"
-                    }
-                }
-            ],
-            "dialog": [
-                {
-                    "key": "hcstandup.dialog",
-                    "title": {
-                        "value": "New report"
-                    },
-                    "url": base_url + "/dialog",
-                    "options": {
-                        "primaryAction": {
-                            "name": {
-                                "value": "Submit",
-                            },
-                            "key": "hcstandup.dialog.submit",
-                            "enabled": True
-                        },
-                        "size": {
-                            "width": "600px",
-                            "height": "200px"
-                        }
-                    }
-                }
-            ],
-            "webPanel": [
-                {
-                    "key": "hcstandup.sidebar",
-                    "name": {
-                        "value": "Standup reports"
-                    },
-                    "location": "hipchat.sidebar.right",
-                    "url": base_url + "/report"
-                }
-            ]
-        })
-    else:
-        descriptor["capabilities"]["hipchatApiConsumer"]["scopes"] = SCOPES_V1
-
-    installable_data = {
-        "scopes": descriptor["capabilities"]["hipchatApiConsumer"]["scopes"]
-    }
-    descriptor["capabilities"]["installable"]["callbackUrl"] = base_url + "/installable/" + \
-                                                               base64.urlsafe_b64encode(json.dumps(installable_data).encode("utf-8")).decode("utf-8")
-
-    response = web.Response(text=json.dumps(descriptor))
-
-    return response
-
-
-def is_hipchat_server(request):
-    hipchat_server = True
-    forwarded_for = request.headers.get('X-FORWARDED-FOR')
-    is_ngrok = request.headers['HOST'] and "ngrok" in request.headers['HOST']
-    if forwarded_for and not is_ngrok:
-        try:
-            resp = (
-            yield from asyncio.wait_for(aiohttp.request("GET", "http://{ip}/v2/capabilities".format(ip=forwarded_for)),
-                                        timeout=1))
-            capdoc = yield from resp.read(decode=True)
-            hipchat_server = capdoc["links"]["self"] == "https://api.hipchat.com/v2/capabilities"
-        except:
-            hipchat_server = False
-
-    return hipchat_server
-
-
 @logged
 @asyncio.coroutine
-@require_jwt(app)
-@allow_cross_origin
+@addon.glance(GLANCE_MODULE_KEY, "Standup",
+              addon.relative_to_base("/static/info.png"), addon.relative_to_base("/static/info@2x.png"),
+              path="/glance",
+              target="hcstandup.sidebar")
 def get_glance(request):
     spec, statuses = yield from find_statuses(app, request.client)
 
@@ -267,6 +151,7 @@ def find_statuses(app, client):
 
 @logged
 @asyncio.coroutine
+@addon.webhook("room_message", pattern="^/(?:status|standup)(\s|$).*", path="/standup", auth=None)
 def standup_webhook(request):
     addon = request.app['addon']
     body = yield from request.json()
@@ -303,7 +188,7 @@ def clear_status(app, client, from_user, room):
 
     yield from standup_db(app).update(spec, data, upsert=True)
 
-    yield from client.send_notification(app['addon'], text="Status Cleared")
+    yield from client.room_client.send_notification(text="Status Cleared")
     yield from update_glance(app, client, room)
     yield from send_udpate(client, room["id"], {
         "user_id": from_user["id"],
@@ -319,9 +204,9 @@ def display_one_status(app, client, mention_name):
 
     status = statuses.get(mention_name)
     if status:
-        yield from client.send_notification(app['addon'], html=render_status(status))
+        yield from client.room_client.send_notification(html=render_status(status))
     else:
-        yield from client.send_notification(app['addon'], text="No status found. "
+        yield from client.room_client.send_notification(text="No status found. "
                                                         "Type '/standup I did this' to add your own status.")
 
 @asyncio.coroutine
@@ -329,9 +214,9 @@ def display_all_statuses(app, client):
     spec, statuses = yield from find_statuses(app, client)
 
     if statuses:
-        yield from client.send_notification(app['addon'], html=render_all_statuses(statuses))
+        yield from client.room_client.send_notification(html=render_all_statuses(statuses))
     else:
-        yield from client.send_notification(app['addon'], text="No status found. "
+        yield from client.room_client.send_notification(text="No status found. "
                                                         "Type '/standup I did this' to add your own status.")
 
 @asyncio.coroutine
@@ -362,7 +247,7 @@ def record_status(app, client, from_user, status, room, request, send_notificati
             message_text = user_name + " has submitted the standup report. Type '/standup' to see the full report."
         else:
             message_text = "Status recorded. Type '/standup' to see the full report."
-        yield from client.send_notification(app['addon'], text=message_text)
+        yield from client.room_client.send_notification(text=message_text)
     yield from update_glance(app, client, room)
     yield from update_sidebar(from_user, request, statuses, user_mention, client, room)
 
@@ -440,7 +325,7 @@ def push_glance_update(app, client, room_id_or_name, glance):
 
 @logged
 @asyncio.coroutine
-@require_jwt(app)
+@addon.webpanel("hcstandup.sidebar", "Standup reports", location="hipchat.sidebar.right", path="/report")
 @aiohttp_jinja2.template('report.jinja2')
 def report_view(request):
     """
@@ -448,14 +333,14 @@ def report_view(request):
     """
     return {
         "base_url": app["config"]["BASE_URL"],
-        "signed_request": request.signed_request,
+        "signed_request": request.token,
         "room_id": request.jwt_data["context"]["room_id"],
         "create_new_report_enabled": os.environ.get("create_new_report_enabled", False)
     }
 
 @logged
 @asyncio.coroutine
-@require_jwt(app)
+@addon.require_jwt()
 def get_statuses(request):
     _, statuses = yield from find_statuses(app, request.client)
 
@@ -463,7 +348,7 @@ def get_statuses(request):
 
 @logged
 @asyncio.coroutine
-@require_jwt(app)
+@addon.require_jwt()
 @aiohttp_jinja2.template('statuses.jinja2')
 def get_statuses_view(request):
     results = []
@@ -477,7 +362,20 @@ def get_statuses_view(request):
 
 @logged
 @asyncio.coroutine
-@require_jwt(app)
+@addon.dialog("hcstandup.dialog", "New report", path="/dialog",
+              options={
+                  "size": {
+                      "width": "600px",
+                      "height": "180px"
+                  },
+                  "primaryAction": {
+                      "name": {
+                          "value": "Submit",
+                      },
+                      "key": "dialog.submit",
+                      "enabled": True
+                  }
+              })
 @aiohttp_jinja2.template('create.jinja2')
 def create_new_report_view(request):
     spec, statuses = yield from find_statuses(app, request.client)
@@ -513,7 +411,7 @@ def create_new_report_view(request):
 
 @logged
 @asyncio.coroutine
-@require_jwt(app)
+@addon.require_jwt()
 def create_new_report(request):
     body = yield from request.json()
 
@@ -592,7 +490,7 @@ def websocket_send_udpate(json_data):
 
 
 @asyncio.coroutine
-@require_jwt(app)
+@addon.require_jwt()
 def websocket_handler(request):
     response = web.WebSocketResponse()
     ok, protocol = response.can_start(request)
@@ -678,12 +576,7 @@ def standup_db(app):
     return app['mongodb'].default_database['standup']
 
 app.router.add_static('/static', os.path.join(os.path.dirname(__file__), 'static'), name='static')
-app.router.add_route('GET', '/', capabilities)
-app.router.add_route('GET', '/glance', get_glance)
 app.router.add_route('GET', '/status', get_statuses)
 app.router.add_route('GET', '/status_view', get_statuses_view)
-app.router.add_route('POST', '/standup', standup_webhook)
-app.router.add_route('GET', '/report', report_view)
-app.router.add_route('GET', '/dialog', create_new_report_view)
 app.router.add_route('POST', '/create', create_new_report)
 app.router.add_route('GET', '/websocket', websocket_handler)
