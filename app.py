@@ -1,16 +1,14 @@
 import asyncio
 from functools import wraps
-import asyncio_redis
-from collections import defaultdict
 from datetime import datetime, timedelta
 import logging
-from urllib.parse import urlparse
 import aiohttp
 from aiohttp import web
 from aiohttp_ac_hipchat.addon_app import create_addon_app
 import json
 from aiohttp_ac_hipchat.util import http_request
 import aiohttp_jinja2
+from aiohttp_ac_hipchat.websocket import websocket_setup
 import arrow
 import bleach
 import jinja2
@@ -64,40 +62,6 @@ def logged(func):
     return inner
 
 @asyncio.coroutine
-def init_pub_sub():
-    redis_url = app['config'].get('REDIS_URL')
-    if not redis_url:
-        redis_url = 'redis://localhost:6379'
-
-    url = urlparse(redis_url)
-
-    db = 0
-    try:
-        if url.path:
-            db = int(url.path.replace('/', ''))
-    except (AttributeError, ValueError):
-        pass
-
-    connection = yield from asyncio_redis.Connection.create(host=url.hostname, port=url.port, password=url.password,
-                                                            db=db)
-    sub = yield from connection.start_subscribe()
-    app["redis_sub"] = sub
-
-    asyncio.async(reader(sub))
-
-@asyncio.coroutine
-def subscribe_new_client(client_id, room_id):
-    chanel_key = "updates:{client_id}:{room_id}".format(client_id=client_id, room_id=room_id)
-    log.debug("Subscribe to {0}".format(chanel_key))
-    yield from app["redis_sub"].subscribe([chanel_key])
-
-@asyncio.coroutine
-def unsubscribe_client(client_id, room_id):
-    chanel_key = "updates:{client_id}:{room_id}".format(client_id=client_id, room_id=room_id)
-    log.debug("Unsubscribe to {0}".format(chanel_key))
-    yield from app["redis_sub"].unsubscribe([chanel_key])
-
-@asyncio.coroutine
 def init(app):
     @asyncio.coroutine
     def send_welcome(event):
@@ -106,7 +70,7 @@ def init(app):
                                                     "you can use Markdown).")
 
     app['addon'].register_event('install', send_welcome)
-    yield from init_pub_sub()
+    yield from websocket_setup(app)
 
 app.add_hook("before_first_request", init)
 
@@ -445,91 +409,8 @@ def get_user(app, client, room_id, user_id):
     return user
 
 @asyncio.coroutine
-def keep_alive(websocket, ping_period=15):
-    while True:
-        yield from asyncio.sleep(ping_period)
-
-        try:
-            websocket.ping()
-        except Exception as e:
-            log.debug('Got exception when trying to keep connection alive, '
-                       'giving up.')
-            return
-
-ws_connections = defaultdict(lambda: defaultdict(set))
-
-@asyncio.coroutine
-def reader(subscriber):
-    while True:
-        reply = yield from subscriber.next_published()
-        yield from websocket_send_udpate(reply.value)
-
-@asyncio.coroutine
 def send_udpate(client, room_id, data):
-    chanel_key = "updates:{client_id}:{room_id}".format(client_id=client.id, room_id=room_id)
-    log.debug("Publish update to Redis channel {0}".format(chanel_key))
-    nb_clients = yield from app['redis_pool'].publish(chanel_key, json.dumps({
-        "client_id": client.id,
-        "room_id": room_id,
-        "data": data,
-    }))
-    log.debug("Published to {0} clients".format(nb_clients))
-
-@asyncio.coroutine
-def websocket_send_udpate(json_data):
-    data = json.loads(json_data)
-
-    ws_connections_for_room = ws_connections[data["client_id"]][data["room_id"]]
-    log.debug("Send update to {0} WebSocket".format(len(ws_connections_for_room)))
-    for ws_connection in ws_connections_for_room:
-        try:
-            ws_connection.send_str(json.dumps(data["data"]))
-        except RuntimeError as e:
-            log.warn(e)
-            ws_connections.remove(ws_connection)
-
-
-@asyncio.coroutine
-@addon.require_jwt()
-def websocket_handler(request):
-    response = web.WebSocketResponse()
-    ok, protocol = response.can_start(request)
-    if not ok:
-        return web.Response(text="Can't start webSocket connection.")
-
-    response.start(request)
-
-    asyncio.async(keep_alive(response))
-
-    client_id = request.client.id
-    room_id = request.jwt_data["context"]["room_id"]
-
-    ws_connections_for_room = ws_connections[client_id][room_id]
-    if len(ws_connections_for_room) == 0:
-        yield from subscribe_new_client(client_id, room_id)
-
-    ws_connections_for_room.add(response)
-    log.debug("WebSocket connection open ({0} in total)".format(len(ws_connections)))
-
-    while True:
-        try:
-            msg = yield from response.receive()
-
-            if msg.tp == aiohttp.MsgType.close:
-                log.info("websocket connection closed")
-            elif msg.tp == aiohttp.MsgType.error:
-                log.warn("response connection closed with exception %s",
-                      response.exception())
-        except RuntimeError:
-            break
-
-    ws_connections_for_room = ws_connections.get(client_id).get(room_id)
-    ws_connections_for_room.remove(response)
-
-    if len(ws_connections_for_room) == 0:
-        yield from unsubscribe_client(client_id, room_id)
-
-    return response
+    yield from app["websocket"].publish(client.id, room_id, data)
 
 def status_to_view(status):
     msg_date = arrow.get(status['date'])
@@ -579,4 +460,3 @@ app.router.add_static('/static', os.path.join(os.path.dirname(__file__), 'static
 app.router.add_route('GET', '/status', get_statuses)
 app.router.add_route('GET', '/status_view', get_statuses_view)
 app.router.add_route('POST', '/create', create_new_report)
-app.router.add_route('GET', '/websocket', websocket_handler)
