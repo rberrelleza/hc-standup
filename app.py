@@ -447,7 +447,7 @@ def status_spec(client):
         "capabilities_url": client.capabilities_url
     }
 
-allowed_tags = bleach.ALLOWED_TAGS + ["p"]
+allowed_tags = bleach.ALLOWED_TAGS + ["p", "br"]
 def render_markdown_as_safe_html(message):
     html = markdown.markdown(message)
 
