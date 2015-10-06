@@ -3,11 +3,11 @@ Markdown==2.6.2
 MarkupSafe==0.23
 PyJWT==1.4.0
 aiohttp==0.17.2
-aiohttp_ac_hipchat==0.3.2
+aiohttp_ac_hipchat==0.3.3
 #-e ../aiohttp_ac_hipchat
 aiohttp-jinja2==0.5.0
 arrow==0.6.0
-asyncio-mongo==0.2.4
+git+https://github.com/mongodb/motor.git#egg=motor
 #asyncio-redis==0.14.1
 -e git+https://github.com/mrdon/asyncio-redis.git#egg=asyncio-redis-mrdon
 bleach==1.4.1

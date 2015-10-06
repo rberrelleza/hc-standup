@@ -454,7 +454,7 @@ def render_markdown_as_safe_html(message):
     return bleach.clean(html, tags=allowed_tags, strip=True)
 
 def standup_db(app):
-    return app['mongodb'].default_database['standup']
+    return app['mongodb']['standup']
 
 app.router.add_static('/static', os.path.join(os.path.dirname(__file__), 'static'), name='static')
 app.router.add_route('GET', '/status', get_statuses)

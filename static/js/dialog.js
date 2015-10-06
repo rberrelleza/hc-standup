@@ -7,6 +7,12 @@
     AP.register({
       'dialog-button-click': function (event, cb) {
         if (event.action === "dialog.submit") {
+          AP.require("dialog", function(dialog) {
+            dialog.updatePrimaryAction({
+              enabled: false
+            });
+          });
+
           $.ajax({
             url: baseUrl + "/create",
             type: "POST",
@@ -16,6 +22,14 @@
             })
           }).done(function() {
             cb(true);
+          }).fail(function() {
+
+            AP.require("dialog", function(dialog) {
+              dialog.updatePrimaryAction({
+                enabled: true
+              });
+            });
+
           });
         } else {
           cb(true);
