@@ -78,7 +78,7 @@ app.add_hook("before_first_request", init)
 @logged
 @asyncio.coroutine
 @addon.glance(GLANCE_MODULE_KEY, "Standup",
-              addon.relative_to_base("/static/info.png"), addon.relative_to_base("/static/info@2x.png"),
+              addon.relative_to_base("/static/standup.png"), addon.relative_to_base("/static/standup.png"),
               path="/glance",
               target="hcstandup.sidebar")
 def get_glance(request):
