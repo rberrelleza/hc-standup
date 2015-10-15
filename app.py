@@ -42,7 +42,8 @@ app, addon = create_addon_app(addon_key="hc-standup",
                               vendor_name="Atlassian",
                               vendor_url="https://atlassian.com",
                               from_name="Standup",
-                              scopes=get_scopes)
+                              scopes=get_scopes,
+                              avatar="/static/standup.png")
 
 aiohttp_jinja2.setup(app, autoescape=True, loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(__file__), 'views')))
 
