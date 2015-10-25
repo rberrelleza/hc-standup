@@ -37,7 +37,7 @@ SCOPES_V2 = ["view_group", "send_notification", "view_room"]
 def get_scopes(context):
     return SCOPES_V2 if context.get("hipchat_server", False) else SCOPES_V1
 
-app, addon = create_addon_app(addon_key="hc-standup-dev",
+app, addon = create_addon_app(addon_key="hc-standup",
                               addon_name="HC Standup",
                               vendor_name="Atlassian",
                               vendor_url="https://atlassian.com",
