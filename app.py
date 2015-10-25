@@ -37,7 +37,7 @@ SCOPES_V2 = ["view_group", "send_notification", "view_room"]
 def get_scopes(context):
     return SCOPES_V2 if context.get("hipchat_server", False) else SCOPES_V1
 
-app, addon = create_addon_app(addon_key="hc-standup",
+app, addon = create_addon_app(addon_key="hc-standup-dev",
                               addon_name="HC Standup",
                               vendor_name="Atlassian",
                               vendor_url="https://atlassian.com",
@@ -299,6 +299,7 @@ def report_view(request):
     return {
         "base_url": app["config"]["BASE_URL"],
         "signed_request": request.token,
+        "theme": request.theme,
         "room_id": request.jwt_data["context"]["room_id"],
         "create_new_report_enabled": os.environ.get("create_new_report_enabled", False)
     }

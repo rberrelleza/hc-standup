@@ -6,6 +6,15 @@ body {
     background: white;
 }
 
+body.dark {
+    background: #333940;
+    color: #c7c7c7;
+}
+
+.dark h1 {
+    color: #c7c7c7;
+}
+
 .report-sidebar {
     height: 100%;
 }
@@ -32,6 +41,10 @@ body {
 
 .statuses .status {
     border-bottom: 1px solid #ccc;
+}
+
+.dark .statuses .status {
+    border-bottom: 1px solid #000;
 }
 
 .header {
@@ -84,9 +97,13 @@ body {
 }
 
 footer {
-    padding: 10px;
+    padding: 8px;
     justify-content: flex-end;
     border-top: 1px solid #ccc;
+}
+
+.dark footer {
+    border-top-color: #000;
 }
 
 .create-dialog {
@@ -124,4 +141,14 @@ footer {
 
 .create-dialog form.aui .buttons-container {
     padding: 4px 0;
+}
+
+.dark footer .aui-button:hover, .dark footer .aui-button:active {
+    background-color: #2b3137;
+    border-color: black;
+    color: white;
+}
+
+.dark footer .aui-button:hover .aui-icon, .dark footer .aui-button:active .aui-icon {
+    color: white;
 }

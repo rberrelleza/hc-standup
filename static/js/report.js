@@ -35,7 +35,8 @@
     $.ajax({
       url: baseUrl + "/status_view",
       type: "GET",
-      dataType: "html"
+      dataType: "html",
+      cache: false
     }).done(function(html) {
       $spinner.data().spinner.stop();
       $(".statuses").append(html);
