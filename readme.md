@@ -8,7 +8,7 @@ To get started, type `/standup`.
 
 ## Dependencies ##
 * A running instance of [mongodb](https://www.mongodb.org/)
-* A running instance of [redis](https://www.redis.io/)
+* A running instance of [redis](https://redis.io/)
 * An [ngrok](https://ngrok.com/) tunnel (if you want to connect to hipchat.com).
 * [Python 3.4](https://www.python.org/downloads/release/python-343/) and [virtualenv](https://virtualenv.pypa.io/en/latest/)
 
