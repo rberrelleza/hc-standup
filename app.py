@@ -220,12 +220,13 @@ def card_json(user, status):
     user_name = user.get('name', None)
     return {
         "style": "application",
+        "format": "medium",
         "id": user_name + str(datetime.utcnow()),
         "title": user_name + "'s standup report.",
         "description": status,
         "activity": {
           "icon": user['photo_url'],
-          "html": "<strong>" + user_name + "</strong> has submitted the standup report."
+          "html": "<strong>" + user_name + '</strong> has submitted <a href="#" data-target="hc-standup:hcstandup.sidebar">the standup report.</a>'
         }
     }
 
