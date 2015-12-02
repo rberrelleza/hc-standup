@@ -212,10 +212,23 @@ def record_status(app, client, from_user, status, room, request, send_notificati
             message_text = user_name + " has submitted the standup report. Type '/standup' to see the full report."
         else:
             message_text = "Status recorded. Type '/standup' to see the full report."
-        asyncio.async(client.room_client.send_notification(text=message_text))
+        asyncio.async(client.room_client.send_notification(text=message_text, card=card_json(from_user,status)))
     asyncio.async(update_glance(app, client, room))
     asyncio.async(update_sidebar(from_user, request, statuses, user_mention, client, room))
 
+def card_json(user, status):
+    user_name = user.get('name', None)
+    return {
+        "style": "application",
+        "format": "medium",
+        "id": user_name + str(datetime.utcnow()),
+        "title": user_name + "'s standup report.",
+        "description": status,
+        "activity": {
+          "icon": user['photo_url'],
+          "html": "<strong>" + user_name + '</strong> has submitted <a href="#" data-target="hc-standup:hcstandup.sidebar">the standup report.</a>'
+        }
+    }
 
 @logged
 @asyncio.coroutine
