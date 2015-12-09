@@ -2,7 +2,6 @@ import asyncio
 from functools import wraps
 from datetime import datetime, timedelta
 import logging
-import aiohttp
 from aiohttp import web
 from aiohttp_ac_hipchat.addon_app import create_addon_app
 import json
@@ -14,22 +13,12 @@ import bleach
 import jinja2
 import markdown
 import os
-
-class RequestIdLoggerAdapter(logging.LoggerAdapter):
-    def process(self, msg, kwargs):
-        if "request" in kwargs:
-            request = kwargs.pop("request")
-            if request is not None:
-                request_id = request.headers.get("X-Request-ID", None)
-                return "{msg} request_id={request_id}".format(msg=msg, request_id=request_id), kwargs
-
-        return super().process(msg, kwargs)
-
+import aiolocals
 
 GLANCE_MODULE_KEY = "hcstandup.glance"
 USER_CACHE_KEY = "hipchat-user:{group_id}:{user_id}"
 
-log = RequestIdLoggerAdapter(logging.getLogger(__name__), {})
+log = logging.getLogger(__name__)
 
 SCOPES_V1 = ["view_group", "send_notification"]
 SCOPES_V2 = ["view_group", "send_notification", "view_room"]
@@ -47,20 +36,18 @@ app, addon = create_addon_app(addon_key="hc-standup",
 
 aiohttp_jinja2.setup(app, autoescape=True, loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(__file__), 'views')))
 
+
 def logged(func):
     @asyncio.coroutine
     @wraps(func)
     def inner(*args, **kwargs):
-        request = None
-        if len(args) == 1 and isinstance(args[0], aiohttp.web.Request):
-            request = args[0]
-
-        log.debug("[ENTER] {func_name}".format(func_name=func.__name__), request=request)
+        log.debug("[ENTER] {func_name}".format(func_name=func.__name__))
         result = (yield from func(*args, **kwargs))
-        log.debug("[EXIT] {func_name}".format(func_name=func.__name__), request=request)
+        log.debug("[EXIT] {func_name}".format(func_name=func.__name__))
         return result
 
     return inner
+
 
 @asyncio.coroutine
 def init(app):
@@ -212,9 +199,9 @@ def record_status(app, client, from_user, status, room, request, send_notificati
             message_text = user_name + " has submitted the standup report. Type '/standup' to see the full report."
         else:
             message_text = "Status recorded. Type '/standup' to see the full report."
-        asyncio.async(client.room_client.send_notification(text=message_text, card=card_json(from_user,status)))
-    asyncio.async(update_glance(app, client, room))
-    asyncio.async(update_sidebar(from_user, request, statuses, user_mention, client, room))
+        aiolocals.wrap_async(client.room_client.send_notification(text=message_text, card=card_json(from_user, status)))
+    aiolocals.wrap_async(update_glance(app, client, room))
+    aiolocals.wrap_async(update_sidebar(from_user, request, statuses, user_mention, client, room))
 
 def card_json(user, status):
     user_name = user.get('name', None)
@@ -274,6 +261,8 @@ def get_room_participants(app, client, room_id_or_name):
                 yield from redis_pool.setex(key=cache_key, value=json.dumps(subset_room_participant), seconds=3600)
 
             return room_participants
+
+    return []
 
 @logged
 @asyncio.coroutine
@@ -450,8 +439,6 @@ def render_status(status):
 
     message = status['message']
     html = render_markdown_as_safe_html(message)
-    html = html.replace("<p>", "")
-    html = html.replace("</p>", "")
     name = status['user']['name']
     return "<b>{name}</b>: {message} -- <i>{ago}</i>".format(name=name, message=html, ago=msg_date.humanize())
 
